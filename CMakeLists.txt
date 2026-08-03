@@ -7,10 +7,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # ==========================================
 # 1. 核心库配置 (Header-only)
 # ==========================================
-add_library(ComtradeCore INTERFACE
-        include/comtrade/record.hpp)
+# 1. 【必须在最前面】先真正创建这个 INTERFACE 库
+add_library(ComtradeCore INTERFACE)
+
+# 2. 【第二步】为它创建一个带命名空间的别名 (ALIAS)，方便后续引用
 add_library(comtrade::ComtradeCore ALIAS ComtradeCore)
 
+# 3. 【第三步】为真正的库配置头文件搜索路径
 target_include_directories(ComtradeCore INTERFACE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
