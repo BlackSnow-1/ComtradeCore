@@ -1,0 +1,233 @@
+/**
+ * @file record.hpp
+ * @brief Unified COMTRADE record object for parsing, manipulation, and writing.
+ * @author 王广博
+ */
+#pragma once
+
+#include "types.hpp"
+#include "utils.hpp"
+#include <fstream>
+#include <iostream>
+#include <cmath>
+
+namespace comtrade {
+    class Record {
+    public:
+        Record() = default;
+
+        ~Record() = default;
+
+        // ==========================================
+        // 1. 数据访问接口
+        // ==========================================
+        [[nodiscard]] inline const CfgData &getCfg() const { return cfg_; }
+        [[nodiscard]] inline const RecordData &getData() const { return data_; }
+
+        // 提供可变引用，允许用户直接在内存中修改配置或数据
+        inline CfgData &getMutableCfg() { return cfg_; }
+        inline RecordData &getMutableData() { return data_; }
+
+        // ==========================================
+        // 2. 解析方法 (Read)
+        // ==========================================
+        inline bool parseCfg(const std::string &cfg_filepath) {
+            std::ifstream file(cfg_filepath);
+            if (!file.is_open()) return false;
+
+            std::string line;
+            int line_count = 0;
+            int analog_parsed = 0;
+
+            // 清空现有状态，准备加载新文件
+            cfg_ = CfgData{};
+
+            while (std::getline(file, line)) {
+                line_count++;
+                auto tokens = utils::split(line);
+                if (tokens.empty()) continue;
+
+                if (line_count == 1) {
+                    cfg_.station_name = !tokens.empty() ? tokens[0] : "";
+                    cfg_.rec_dev_id = tokens.size() > 1 ? tokens[1] : "";
+                    cfg_.version = tokens.size() > 2 ? utils::determineVersion(tokens[2]) : StandardVersion::V1991;
+                } else if (line_count == 2) {
+                    cfg_.total_channels = std::stoi(tokens[0]);
+                    cfg_.analog_count = std::stoi(tokens[1].substr(0, tokens[1].find('A')));
+                    cfg_.digital_count = std::stoi(tokens[2].substr(0, tokens[2].find('D')));
+
+                    cfg_.analog_channels.reserve(cfg_.analog_count);
+                    cfg_.digital_channels.reserve(cfg_.digital_count);
+                } else if (analog_parsed < cfg_.analog_count) {
+                    AnalogChannel ac;
+                    ac.index = std::stoi(tokens[0]);
+                    if (tokens.size() > 1) ac.id = tokens[1];
+                    if (tokens.size() > 5) ac.a = std::stod(tokens[5]);
+                    if (tokens.size() > 6) ac.b = std::stod(tokens[6]);
+                    cfg_.analog_channels.push_back(ac);
+                    analog_parsed++;
+                }
+                // 剩下的数字通道、频率等状态机解析逻辑...
+            }
+            return true;
+        }
+
+        inline bool parseDat(const std::string &dat_filepath) {
+            if (cfg_.data_type != DataType::ASCII) {
+                std::cerr << "[COMTRADE] Currently only ASCII is supported for parsing.\n";
+                return false;
+            }
+
+            std::ifstream file(dat_filepath);
+            if (!file.is_open()) return false;
+
+            data_ = RecordData{}; // 清空旧数据
+            data_.analog_values.resize(cfg_.analog_count);
+            data_.digital_values.resize(cfg_.digital_count);
+
+            std::string line;
+            while (std::getline(file, line)) {
+                auto tokens = utils::split(line);
+                if (tokens.size() < static_cast<size_t>(2) + cfg_.analog_count + cfg_.digital_count) continue;
+
+                data_.timestamp.push_back(std::stoul(tokens[1]));
+
+                for (int i = 0; i < cfg_.analog_count; ++i) {
+                    double raw_val = std::stod(tokens[2 + i]);
+                    double real_val = raw_val * cfg_.analog_channels[i].a + cfg_.analog_channels[i].b;
+                    data_.analog_values[i].push_back(real_val);
+                }
+            }
+            return true;
+        }
+
+        // ==========================================
+        // 3. 落盘方法 (Write/Save)
+        // ==========================================
+        [[nodiscard]] inline bool saveCfg(const std::string &filepath) const {
+            std::ofstream out(filepath);
+            if (!out.is_open()) return false;
+
+            out << cfg_.station_name << "," << cfg_.rec_dev_id << "," << static_cast<int>(cfg_.version) << "\n";
+            out << cfg_.total_channels << "," << cfg_.analog_count << "A," << cfg_.digital_count << "D\n";
+
+            for (const auto &ac: cfg_.analog_channels) {
+                out << ac.index << "," << ac.id << "," << ac.phase << "," << ac.ccbm << ","
+                        << ac.uu << "," << ac.a << "," << ac.b << "," << ac.skew << ","
+                        << ac.min << "," << ac.max << "," << ac.primary << "," << ac.secondary << "," << ac.ps << "\n";
+            }
+
+            for (const auto &dc: cfg_.digital_channels) {
+                out << dc.index << "," << dc.id << "," << dc.phase << "," << dc.ccbm << "," << dc.normal_state << "\n";
+            }
+
+            out << cfg_.line_frequency << "\n";
+            out << "1\n";
+
+            double sample_rate = 0;
+            if (data_.timestamp.size() > 1) {
+                sample_rate = 1000000.0 / (data_.timestamp[1] - data_.timestamp[0]);
+            }
+            out << sample_rate << "," << data_.timestamp.size() << "\n";
+            out << utils::formatTime(cfg_.start_time) << "\n";
+            out << utils::formatTime(cfg_.trigger_time) << "\n";
+            out << (cfg_.data_type == DataType::ASCII ? "ASCII" : "BINARY") << "\n";
+            out << "1.0\n";
+
+            return true;
+        }
+
+        [[nodiscard]] inline bool saveDat(const std::string &filepath) const {
+            if (cfg_.data_type != DataType::ASCII) return false;
+
+            std::ofstream out(filepath);
+            if (!out.is_open()) return false;
+
+            size_t num_samples = data_.timestamp.size();
+            for (size_t i = 0; i < num_samples; ++i) {
+                out << (i + 1) << "," << data_.timestamp[i];
+
+                for (size_t j = 0; j < static_cast<size_t>(cfg_.analog_count); ++j) {
+                    double real_val = data_.analog_values[j][i];
+                    double a = cfg_.analog_channels[j].a;
+                    double b = cfg_.analog_channels[j].b;
+
+                    int raw_val = (a != 0.0) ? static_cast<int>(std::round((real_val - b) / a)) : 0;
+                    out << "," << raw_val;
+                }
+
+                for (size_t j = 0; j < static_cast<size_t>(cfg_.digital_count); ++j) {
+                    out << "," << (data_.digital_values[j][i] ? 1 : 0);
+                }
+                out << "\n";
+            }
+            return true;
+        }
+
+        // ==========================================
+        // 4. 数据构造与操作方法 (Manipulation)
+        // ==========================================
+        inline void setStationAndDevice(const std::string &station, const std::string &device,
+                                        StandardVersion version = StandardVersion::V1999) {
+            cfg_.station_name = station;
+            cfg_.rec_dev_id = device;
+            cfg_.version = version;
+        }
+
+        inline void addAnalogChannel(const AnalogChannel &ch) {
+            cfg_.analog_channels.push_back(ch);
+            cfg_.analog_count++;
+            cfg_.total_channels++;
+        }
+
+        inline void addDigitalChannel(const DigitalChannel &ch) {
+            cfg_.digital_channels.push_back(ch);
+            cfg_.digital_count++;
+            cfg_.total_channels++;
+        }
+
+        inline void addSample(uint32_t timestamp_us,
+                              const std::vector<double> &analog_reals,
+                              const std::vector<bool> &digital_vals) {
+            data_.timestamp.push_back(timestamp_us);
+
+            if (data_.analog_values.empty() && cfg_.analog_count > 0) {
+                data_.analog_values.resize(cfg_.analog_count);
+            }
+            if (data_.digital_values.empty() && cfg_.digital_count > 0) {
+                data_.digital_values.resize(cfg_.digital_count);
+            }
+
+            for (size_t i = 0; i < analog_reals.size() && i < static_cast<size_t>(cfg_.analog_count); ++i) {
+                data_.analog_values[i].push_back(analog_reals[i]);
+            }
+            for (size_t i = 0; i < digital_vals.size() && i < static_cast<size_t>(cfg_.digital_count); ++i) {
+                data_.digital_values[i].push_back(digital_vals[i]);
+            }
+        }
+
+        /**
+         * @brief 设置 COMTRADE 记录的开始时间和触发时间
+         * @param start_time   记录开始时间 (纳秒级 TimePoint)
+         * @param trigger_time 触发动作时间 (纳秒级 TimePoint)
+         */
+        inline void setTimestamps(const TimePoint &start_time, const TimePoint &trigger_time) {
+            cfg_.start_time = start_time;
+            cfg_.trigger_time = trigger_time;
+        }
+
+        /**
+         * @brief 设置 COMTRADE 记录的开始时间和触发时间 (字符串解析版)
+         * @param start_time_str   记录开始时间 (格式: dd/mm/yyyy,hh:mm:ss.ssssss)
+         * @param trigger_time_str 触发动作时间 (格式: dd/mm/yyyy,hh:mm:ss.ssssss)
+         */
+        inline void setTimestamps(const std::string &start_time_str, const std::string &trigger_time_str) {
+            cfg_.start_time = utils::parseTime(start_time_str);
+            cfg_.trigger_time = utils::parseTime(trigger_time_str);
+        }
+
+    private:
+        CfgData cfg_;
+        RecordData data_;
+    };
+} // namespace comtrade
