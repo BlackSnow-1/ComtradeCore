@@ -24,39 +24,6 @@ ComtradeCore/
 │   └── read_comtrade.cpp     # 快速上手示例
 └── tests/
     └── test_parser.cpp       # 单元测试
-
-这里为你准备了完整的 README 文件、使用示例（`examples/read_comtrade.cpp`）以及基础单元测试（`tests/test_parser.cpp`）。你可以直接将这些文本复制到你的项目中。
-
-### 1. 📖 README.md
-
-```markdown
-# ComtradeCore
-一个轻量、零依赖的现代 C++ 核心库，专为电力系统暂态数据（COMTRADE）的解析与内存构造而设计[cite: 1]。
-
-## ✨ 特性
-
-* **Header-Only**：仅由头文件组成，零外部依赖，极易集成。
-* **现代 C++**：基于 C++17 标准构建，保证类型安全与高性能。
-* **多版本兼容**：向下兼容 IEEE C37.111 的 1991、1999 与 2013 版标准。
-* **扩展性强**：数据结构清晰，非常容易与 `nlohmann/json` 等库结合进行二次开发。
-
-## 📂 目录结构
-
-```text
-ComtradeCore/
-├── CMakeLists.txt
-├── README.md
-├── include/
-│   └── comtrade/
-│       ├── comtrade.hpp      # 统一引入头文件
-│       ├── types.hpp         # 数据结构定义
-│       ├── utils.hpp         # 内部字符串与类型工具
-│       └── parser.hpp        # CFG/DAT 核心解析逻辑
-├── examples/
-│   └── read_comtrade.cpp     # 快速上手示例
-└── tests/
-    └── test_parser.cpp       # 单元测试
-
 ```
 
 ## 🚀 快速集成 (CMake)
@@ -66,7 +33,6 @@ ComtradeCore/
 ```cmake
 add_subdirectory(path/to/ComtradeCore)
 target_link_libraries(your_target PRIVATE comtrade::ComtradeCore)
-
 ```
 
 ## 💡 快速上手
