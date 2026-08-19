@@ -4,6 +4,15 @@ project(ComtradeCore VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
+if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
+    set(COMTRADE_IS_TOP_LEVEL ON)
+else()
+    set(COMTRADE_IS_TOP_LEVEL OFF)
+endif()
+
 # ==========================================
 # 1. 核心库配置 (Header-only)
 # ==========================================
@@ -16,17 +25,16 @@ add_library(comtrade::ComtradeCore ALIAS ComtradeCore)
 # 3. 【第三步】为真正的库配置头文件搜索路径
 target_include_directories(ComtradeCore INTERFACE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
+
+target_compile_features(ComtradeCore INTERFACE cxx_std_17)
 
 # ==========================================
 # 2. 单元测试配置 (引入 GoogleTest)
 # ==========================================
-# 开启 CTest 测试支持
-enable_testing()
-
 # 优先查找本地系统是否已安装 GTest (QUIET 表示找不到时不报错)
-option(COMTRADE_BUILD_TESTS "Build ComtradeCore unit tests" ON)
+option(COMTRADE_BUILD_TESTS "Build ComtradeCore unit tests" ${COMTRADE_IS_TOP_LEVEL})
 
 if(COMTRADE_BUILD_TESTS)
     enable_testing()
@@ -51,9 +59,48 @@ if(COMTRADE_BUILD_TESTS)
 endif()
 
 
-option(COMTRADE_BUILD_EXAMPLES "Build ComtradeCore examples" ON)
+option(COMTRADE_BUILD_EXAMPLES "Build ComtradeCore examples" ${COMTRADE_IS_TOP_LEVEL})
 
 if(COMTRADE_BUILD_EXAMPLES)
     message(STATUS "ComtradeCore: Building examples enabled")
     add_subdirectory(examples)
 endif()
+
+# ==========================================
+# 3. 安装与 CMake package 导出
+# ==========================================
+install(TARGETS ComtradeCore
+        EXPORT ComtradeCoreTargets
+)
+
+install(DIRECTORY include/
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+
+install(EXPORT ComtradeCoreTargets
+        FILE ComtradeCoreTargets.cmake
+        NAMESPACE comtrade::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ComtradeCore
+)
+
+configure_package_config_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ComtradeCoreConfig.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/ComtradeCoreConfig.cmake
+        INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ComtradeCore
+)
+
+write_basic_package_version_file(
+        ${CMAKE_CURRENT_BINARY_DIR}/ComtradeCoreConfigVersion.cmake
+        VERSION ${PROJECT_VERSION}
+        COMPATIBILITY SameMajorVersion
+)
+
+install(FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/ComtradeCoreConfig.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/ComtradeCoreConfigVersion.cmake
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ComtradeCore
+)
+
+install(FILES LICENSE README.md
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/ComtradeCore
+)

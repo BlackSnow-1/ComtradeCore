@@ -1,103 +1,263 @@
 # ComtradeCore
-一个轻量、零依赖的现代 C++ 核心库，专为电力系统暂态数据（COMTRADE）的解析与内存构造而设计。
 
-## ✨ 特性
+ComtradeCore 是一个轻量、Header-only 的 C++17 COMTRADE 库，用于构造、写入和流式读取电力系统暂态记录。
+核心库只依赖 C++ 标准库。
 
-* **Header-Only**：仅由头文件组成，零外部依赖，极易集成。
-* **现代 C++**：基于 C++17 标准构建，保证类型安全与高性能。
-* **多版本兼容**：向下兼容 IEEE C37.111 的 1991、1999 与 2013 版标准。
-* **扩展性强**：数据结构清晰，非常容易与 `nlohmann/json` 等库结合进行二次开发。
+## 功能概览
 
-## 📂 目录结构
+- 使用 `Record` 在内存中构造记录并生成 CFG、DAT 文件。
+- 使用 `StreamWriter` 写入 ASCII、BINARY 和 BINARY32 DAT 数据。
+- 使用 `StreamReader` 逐采样读取 ASCII DAT，避免一次性加载完整文件。
+- 支持 IEEE C37.111 的 1991、1999 和 2013 版本标识。
+- 提供可安装的 CMake package，安装后可通过 `find_package()` 使用。
+
+> 当前 `StreamReader` 和 `Record::parseDat()` 只支持读取 ASCII DAT；BINARY、BINARY32、FLOAT32
+> 的流式读取尚未实现。
+
+## 环境要求
+
+- 支持 C++17 的编译器：GCC、Clang 或 MSVC。
+- CMake 3.14 或更高版本。
+- GoogleTest 仅在构建单元测试时需要；核心库本身不依赖 GoogleTest。
+
+## 安装与集成
+
+### 方法一：作为 CMake 子项目使用
+
+将 ComtradeCore 放入项目目录，例如：
+
+```text
+your-project/
+├── CMakeLists.txt
+├── src/
+└── third_party/
+    └── ComtradeCore/
+```
+
+在项目的 `CMakeLists.txt` 中添加：
+
+```cmake
+add_subdirectory(third_party/ComtradeCore)
+
+add_executable(your_app src/main.cpp)
+target_link_libraries(your_app PRIVATE comtrade::ComtradeCore)
+```
+
+ComtradeCore 作为子项目使用时，测试和示例默认关闭，不会为下游项目自动下载 GoogleTest。
+
+### 方法二：安装后使用 `find_package`
+
+先配置并安装 ComtradeCore。单配置生成器可执行：
+
+```bash
+cmake -S . -B build \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCOMTRADE_BUILD_TESTS=OFF \
+  -DCOMTRADE_BUILD_EXAMPLES=OFF \
+  -DCMAKE_INSTALL_PREFIX=/path/to/comtrade-install
+
+cmake --build build
+cmake --install build
+```
+
+Visual Studio、CLion 多配置工具链可以指定配置：
+
+```bash
+cmake --build build --config Release
+cmake --install build --config Release
+```
+
+Windows 安装前缀示例：
+
+```text
+-DCMAKE_INSTALL_PREFIX=C:/Libraries/ComtradeCore
+```
+
+安装内容包括：
+
+```text
+<prefix>/
+├── include/comtrade/
+├── lib/cmake/ComtradeCore/
+└── share/doc/ComtradeCore/
+```
+
+然后在使用方项目中：
+
+```cmake
+find_package(ComtradeCore CONFIG REQUIRED)
+
+add_executable(your_app src/main.cpp)
+target_link_libraries(your_app PRIVATE comtrade::ComtradeCore)
+```
+
+如果安装目录不是系统默认搜索路径，在配置使用方项目时传入：
+
+```bash
+cmake -S . -B build \
+  -DCMAKE_PREFIX_PATH=/path/to/comtrade-install
+```
+
+在 CLion 中可将同一参数填写到 **Settings | Build, Execution, Deployment | CMake | CMake options**。
+
+### 方法三：直接使用头文件
+
+也可以将仓库中的 `include/comtrade` 复制到项目的头文件搜索路径，然后启用 C++17：
+
+```cmake
+target_compile_features(your_app PRIVATE cxx_std_17)
+target_include_directories(your_app PRIVATE /path/to/ComtradeCore/include)
+```
+
+## 生成 COMTRADE 文件
+
+下面的示例生成一组 ASCII 格式的 `record.cfg` 和 `record.dat`：
+
+```cpp
+#include <comtrade/record.hpp>
+
+#include <iostream>
+
+int main() {
+    comtrade::Record record;
+    record.setStationAndDevice(
+        "GRID_01",
+        "RELAY_01",
+        comtrade::StandardVersion::V1999);
+
+    comtrade::AnalogChannel voltage;
+    voltage.index = 1;
+    voltage.id = "VA";
+    voltage.phase = "A";
+    voltage.uu = "V";
+    voltage.a = 0.1;
+    voltage.b = -5.0;
+    record.addAnalogChannel(voltage);
+
+    comtrade::DigitalChannel trip;
+    trip.index = 1;
+    trip.id = "TRIP";
+    record.addDigitalChannel(trip);
+
+    record.addSample(0, {220.0}, {false});
+    record.addSample(250, {221.2}, {true});
+    record.getMutableCfg().data_type = comtrade::DataType::ASCII;
+
+    if (!record.saveCfg("record.cfg") || !record.saveDat("record.dat")) {
+        std::cerr << "生成 COMTRADE 文件失败\n";
+        return 1;
+    }
+}
+```
+
+COMTRADE 记录由同名的配置文件和数据文件组成：
+
+```text
+record.cfg
+record.dat
+```
+
+## 流式读取
+
+`StreamReader` 在构造时必须接收 CFG 路径。CFG 不存在或解析失败时，构造函数会抛出
+`std::runtime_error`。
+
+```cpp
+#include <comtrade/stream_reader.hpp>
+
+#include <iostream>
+#include <stdexcept>
+
+int main() {
+    try {
+        comtrade::StreamReader reader("record.cfg");
+
+        const auto& cfg = reader.getCfg();
+        std::cout << "站名: " << cfg.station_name << '\n';
+        std::cout << "模拟通道数: " << cfg.analog_count << '\n';
+        std::cout << "数字通道数: " << cfg.digital_count << '\n';
+
+        const std::size_t processed = reader.processDatStream(
+            "record.dat",
+            [](const comtrade::SampleRow& row) {
+                std::cout << "序号: " << row.index
+                          << ", 时间戳: " << row.timestamp_us << " us\n";
+
+                for (std::size_t i = 0; i < row.analog_values.size(); ++i) {
+                    std::cout << "  模拟量[" << i << "]: "
+                              << row.analog_values[i] << '\n';
+                }
+
+                for (std::size_t i = 0; i < row.digital_values.size(); ++i) {
+                    std::cout << "  数字量[" << i << "]: "
+                              << (row.digital_values[i] ? "ON" : "OFF") << '\n';
+                }
+            });
+
+        std::cout << "共处理 " << processed << " 个采样点\n";
+    } catch (const std::runtime_error& error) {
+        std::cerr << "加载 COMTRADE 配置失败: " << error.what() << '\n';
+        return 1;
+    }
+}
+```
+
+Reader 会把 CFG 中的模拟通道系数应用到 DAT 原始值：
+
+```text
+实际值 = 原始值 × a + b
+```
+
+### 回调对象的生命周期
+
+为了保持稳定的内存占用，`StreamReader` 会复用同一个 `SampleRow` 缓冲区。不要在回调结束后继续
+持有 `row` 的引用、地址，或者它内部容器的引用。
+
+如果需要长期保存采样点，应在回调中复制：
+
+```cpp
+std::vector<comtrade::SampleRow> rows;
+
+reader.processDatStream("record.dat", [&](const comtrade::SampleRow& row) {
+    rows.push_back(row);
+});
+```
+
+如果只需要实时统计或转发数据，直接在回调中处理可以保持近似恒定的内存占用。
+
+## 构建并运行测试
+
+```bash
+cmake -S . -B build \
+  -DCOMTRADE_BUILD_TESTS=ON \
+  -DCOMTRADE_BUILD_EXAMPLES=OFF
+
+cmake --build build --config Debug
+ctest --test-dir build -C Debug --output-on-failure
+```
+
+流式端到端测试会在临时目录生成 CFG、DAT 文件，完成读取验证后自动清理。
+
+在 CLion 中重新加载 CMake 后，可以直接运行 `comtrade_unit_tests` 目标，或只运行：
+
+```text
+StreamEngineTest.GeneratesComtradeFilesAndStreamsEverySample
+```
+
+## 目录结构
 
 ```text
 ComtradeCore/
+├── cmake/                         # CMake package 配置模板
+├── examples/                      # 示例程序
+├── include/comtrade/
+│   ├── comtrade.hpp               # Record 统一入口
+│   ├── record.hpp                 # 内存记录的构造、读写
+│   ├── stream_reader.hpp          # 流式读取
+│   ├── stream_writer.hpp          # 流式写入
+│   ├── types.hpp                  # 数据类型和通道定义
+│   └── utils.hpp                  # 内部工具
+├── tests/                         # GoogleTest 单元测试
 ├── CMakeLists.txt
-├── README.md
-├── include/
-│   └── comtrade/
-│       ├── comtrade.hpp      # 统一引入头文件
-│       ├── types.hpp         # 数据结构定义
-│       ├── utils.hpp         # 内部字符串与类型工具
-│       └── parser.hpp        # CFG/DAT 核心解析逻辑
-├── examples/
-│   └── read_comtrade.cpp     # 快速上手示例
-└── tests/
-    └── test_parser.cpp       # 单元测试
+└── README.md
 ```
-
-## 🚀 快速集成 (CMake)
-
-本项目是 Header-only 库，你只需在你的 `CMakeLists.txt` 中引入本库，并链接 `comtrade::ComtradeCore` 即可：
-
-```cmake
-add_subdirectory(path/to/ComtradeCore)
-target_link_libraries(your_target PRIVATE comtrade::ComtradeCore)
-```
-
-## 💡 快速上手
-
-请参考 `examples/read_comtrade.cpp` 以获取完整的读写示例。
-
-这是一个典型的读取示例，展示了如何解析文件并访问转换后的一次值（如电压、电流采样值）。
-
-```cpp
-#include <iostream>
-#include <iomanip>
-#include <comtrade/comtrade.hpp>
-
-int main() {
-    comtrade::Parser parser;
-    
-    // 假设当前目录下有 test.cfg 和 test.dat
-    std::string cfg_file = "test.cfg";
-    std::string dat_file = "test.dat";
-
-    // 1. 解析 CFG 文件
-    if (!parser.parseCfg(cfg_file)) {
-        std::cerr << "Failed to open or parse CFG file: " << cfg_file << "\n";
-        return -1;
-    }
-
-    const auto& cfg = parser.getCfg();
-    std::cout << "=== COMTRADE Info ===\n";
-    std::cout << "Station Name: " << cfg.station_name << "\n";
-    std::cout << "Device ID: " << cfg.rec_dev_id << "\n";
-    std::cout << "Total Channels: " << cfg.total_channels << "\n";
-    std::cout << "Analog Channels: " << cfg.analog_count << "\n";
-    std::cout << "Digital Channels: " << cfg.digital_count << "\n";
-
-    // 打印前几个模拟通道的信息
-    for (int i = 0; i < std::min(cfg.analog_count, 3); ++i) {
-        const auto& ac = cfg.analog_channels[i];
-        std::cout << " - Analog Ch[" << i << "]: " << ac.id 
-                  << " (" << ac.phase << ") Units: " << ac.uu << "\n";
-    }
-
-    // 2. 解析 DAT 文件
-    if (!parser.parseDat(dat_file)) {
-        std::cerr << "Failed to open or parse DAT file: " << dat_file << "\n";
-        return -1;
-    }
-
-    const auto& data = parser.getData();
-    std::cout << "\n=== Data Loaded ===\n";
-    std::cout << "Total Samples: " << data.timestamp.size() << "\n";
-
-    if (!data.timestamp.empty() && cfg.analog_count > 0) {
-        std::cout << "Sample 0 Timestamp: " << data.timestamp[0] << " us\n";
-        std::cout << "Sample 0, Analog Ch 0 Real Value: " 
-                  << std::fixed << std::setprecision(4) 
-                  << data.analog_values[0][0] << " " << cfg.analog_channels[0].uu << "\n";
-    }
-
-    return 0;
-}
-
-```
-**流式处理优势：**
-
-* **极致内存压缩：** 无论文件是 10MB 还是 10GB，内存占用始终恒定。
-* **零内存分配开销：** 内部采用缓冲区复用技术，在 `while` 循环解析中不产生 `new` 或 `std::vector` 的重分配开销。
-* **高吞吐量：** 数据边读边解边释放，极大地提高了 CPU 的 L1/L2 缓存命中率。
-
