@@ -7,9 +7,12 @@
 
 #include "types.hpp"
 #include "utils.hpp"
+#include "cfg_io.hpp"
 #include <fstream>
 #include <iostream>
 #include <cmath>
+#include <iomanip>
+#include <limits>
 
 namespace comtrade {
     class Record {
@@ -32,43 +35,9 @@ namespace comtrade {
         // 2. 解析方法 (Read)
         // ==========================================
         inline bool parseCfg(const std::string &cfg_filepath) {
-            std::ifstream file(cfg_filepath);
-            if (!file.is_open()) return false;
-
-            std::string line;
-            int line_count = 0;
-            int analog_parsed = 0;
-
-            // 清空现有状态，准备加载新文件
-            cfg_ = CfgData{};
-
-            while (std::getline(file, line)) {
-                line_count++;
-                auto tokens = utils::split(line);
-                if (tokens.empty()) continue;
-
-                if (line_count == 1) {
-                    cfg_.station_name = !tokens.empty() ? tokens[0] : "";
-                    cfg_.rec_dev_id = tokens.size() > 1 ? tokens[1] : "";
-                    cfg_.version = tokens.size() > 2 ? utils::determineVersion(tokens[2]) : StandardVersion::V1991;
-                } else if (line_count == 2) {
-                    cfg_.total_channels = std::stoi(tokens[0]);
-                    cfg_.analog_count = std::stoi(tokens[1].substr(0, tokens[1].find('A')));
-                    cfg_.digital_count = std::stoi(tokens[2].substr(0, tokens[2].find('D')));
-
-                    cfg_.analog_channels.reserve(cfg_.analog_count);
-                    cfg_.digital_channels.reserve(cfg_.digital_count);
-                } else if (analog_parsed < cfg_.analog_count) {
-                    AnalogChannel ac;
-                    ac.index = std::stoi(tokens[0]);
-                    if (tokens.size() > 1) ac.id = tokens[1];
-                    if (tokens.size() > 5) ac.a = std::stod(tokens[5]);
-                    if (tokens.size() > 6) ac.b = std::stod(tokens[6]);
-                    cfg_.analog_channels.push_back(ac);
-                    analog_parsed++;
-                }
-                // 剩下的数字通道、频率等状态机解析逻辑...
-            }
+            CfgData parsed_cfg;
+            if (!detail::parseCfgFile(cfg_filepath, parsed_cfg)) return false;
+            cfg_ = std::move(parsed_cfg);
             return true;
         }
 
@@ -90,12 +59,20 @@ namespace comtrade {
                 auto tokens = utils::split(line);
                 if (tokens.size() < static_cast<size_t>(2) + cfg_.analog_count + cfg_.digital_count) continue;
 
-                data_.timestamp.push_back(std::stoul(tokens[1]));
+                const auto raw_timestamp = std::stoul(tokens[1]);
+                const auto timestamp_us = std::llround(raw_timestamp * cfg_.time_multiplier);
+                if (timestamp_us < 0 || timestamp_us > std::numeric_limits<uint32_t>::max()) continue;
+                data_.timestamp.push_back(static_cast<uint32_t>(timestamp_us));
 
                 for (int i = 0; i < cfg_.analog_count; ++i) {
                     double raw_val = std::stod(tokens[2 + i]);
                     double real_val = raw_val * cfg_.analog_channels[i].a + cfg_.analog_channels[i].b;
                     data_.analog_values[i].push_back(real_val);
+                }
+
+                for (int i = 0; i < cfg_.digital_count; ++i) {
+                    const auto token_index = static_cast<std::size_t>(2 + cfg_.analog_count + i);
+                    data_.digital_values[i].push_back(std::stoul(tokens[token_index]) != 0);
                 }
             }
             return true;
@@ -105,8 +82,19 @@ namespace comtrade {
         // 3. 落盘方法 (Write/Save)
         // ==========================================
         [[nodiscard]] inline bool saveCfg(const std::string &filepath) const {
+            if (!std::isfinite(cfg_.time_multiplier) || cfg_.time_multiplier <= 0.0 ||
+                cfg_.timestamp_fractional_digits > 9) {
+                return false;
+            }
+            if (cfg_.version == StandardVersion::V2013 &&
+                (cfg_.time_code.empty() || cfg_.local_code.empty() || cfg_.time_quality_code.empty() ||
+                 cfg_.leap_second < -1 || cfg_.leap_second > 1)) {
+                return false;
+            }
+
             std::ofstream out(filepath);
             if (!out.is_open()) return false;
+            out << std::setprecision(15);
 
             out << cfg_.station_name << "," << cfg_.rec_dev_id << "," << static_cast<int>(cfg_.version) << "\n";
             out << cfg_.total_channels << "," << cfg_.analog_count << "A," << cfg_.digital_count << "D\n";
@@ -122,30 +110,46 @@ namespace comtrade {
             }
 
             out << cfg_.line_frequency << "\n";
-            out << "1\n";
-
-            double sample_rate = 0;
-            if (data_.timestamp.size() > 1) {
-                sample_rate = 1000000.0 / (data_.timestamp[1] - data_.timestamp[0]);
+            auto sample_rates = cfg_.sample_rates;
+            if (sample_rates.empty()) {
+                double sample_rate = 0.0;
+                if (data_.timestamp.size() > 1 && data_.timestamp[1] != data_.timestamp[0]) {
+                    sample_rate = 1000000.0 / (data_.timestamp[1] - data_.timestamp[0]);
+                }
+                sample_rates.push_back({sample_rate, static_cast<uint32_t>(data_.timestamp.size())});
             }
-            out << sample_rate << "," << data_.timestamp.size() << "\n";
-            out << utils::formatTime(cfg_.start_time) << "\n";
-            out << utils::formatTime(cfg_.trigger_time) << "\n";
-            out << (cfg_.data_type == DataType::ASCII ? "ASCII" : "BINARY") << "\n";
-            out << "1.0\n";
+
+            out << sample_rates.size() << "\n";
+            for (const auto& sample_rate : sample_rates) {
+                out << sample_rate.samples_per_second << "," << sample_rate.end_sample << "\n";
+            }
+            out << utils::formatTime(cfg_.start_time, cfg_.timestamp_fractional_digits) << "\n";
+            out << utils::formatTime(cfg_.trigger_time, cfg_.timestamp_fractional_digits) << "\n";
+            out << DataTypeUtils::ToString(cfg_.data_type) << "\n";
+
+            if (cfg_.version != StandardVersion::V1991) {
+                out << cfg_.time_multiplier << "\n";
+            }
+            if (cfg_.version == StandardVersion::V2013) {
+                out << cfg_.time_code << "," << cfg_.local_code << "\n";
+                out << cfg_.time_quality_code << "," << cfg_.leap_second << "\n";
+            }
 
             return true;
         }
 
         [[nodiscard]] inline bool saveDat(const std::string &filepath) const {
             if (cfg_.data_type != DataType::ASCII) return false;
+            if (!std::isfinite(cfg_.time_multiplier) || cfg_.time_multiplier <= 0.0) return false;
 
             std::ofstream out(filepath);
             if (!out.is_open()) return false;
 
             size_t num_samples = data_.timestamp.size();
             for (size_t i = 0; i < num_samples; ++i) {
-                out << (i + 1) << "," << data_.timestamp[i];
+                const auto raw_timestamp = std::llround(data_.timestamp[i] / cfg_.time_multiplier);
+                if (raw_timestamp < 0 || raw_timestamp > std::numeric_limits<uint32_t>::max()) return false;
+                out << (i + 1) << "," << raw_timestamp;
 
                 for (size_t j = 0; j < static_cast<size_t>(cfg_.analog_count); ++j) {
                     double real_val = data_.analog_values[j][i];
