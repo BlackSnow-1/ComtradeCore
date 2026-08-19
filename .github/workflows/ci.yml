@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test-install:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux GCC
+            os: ubuntu-latest
+            compiler: -DCMAKE_CXX_COMPILER=g++
+            artifact: linux-gcc
+          - name: Linux Clang
+            os: ubuntu-latest
+            compiler: -DCMAKE_CXX_COMPILER=clang++
+            artifact: linux-clang
+          - name: Windows MSVC
+            os: windows-latest
+            compiler: ""
+            artifact: windows-msvc
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Configure
+        run: >-
+          cmake -S . -B build
+          ${{ matrix.compiler }}
+          -DCMAKE_BUILD_TYPE=Release
+          -DCOMTRADE_BUILD_TESTS=ON
+          -DCOMTRADE_BUILD_EXAMPLES=ON
+          -DCMAKE_DISABLE_FIND_PACKAGE_GTest=ON
+          -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/staging"
+
+      - name: Build
+        run: cmake --build build --config Release --parallel 2
+
+      - name: Run unit tests
+        run: ctest --test-dir build --build-config Release --output-on-failure
+
+      - name: Install
+        run: cmake --install build --config Release
+
+      - name: Configure installed-package consumer
+        run: >-
+          cmake -S .github/install-test -B install-test-build
+          ${{ matrix.compiler }}
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_PREFIX_PATH="${{ github.workspace }}/staging"
+
+      - name: Build installed-package consumer
+        run: cmake --build install-test-build --config Release --parallel 2
+
+      - name: Test installed-package consumer
+        run: ctest --test-dir install-test-build --build-config Release --output-on-failure
+
+      - name: Upload installed package
+        uses: actions/upload-artifact@v7
+        with:
+          name: ComtradeCore-${{ matrix.artifact }}
+          path: staging
+          if-no-files-found: error
+          retention-days: 7
