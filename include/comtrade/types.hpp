@@ -10,6 +10,7 @@
 #include <vector>
 #include <cstdint>
 #include <algorithm>
+#include <stdexcept>
 
 namespace comtrade {
     // 定义纳秒级别的 TimePoint 别名
