@@ -1,176 +1,285 @@
 #include <gtest/gtest.h>
-#include <filesystem>
-#include <chrono>
-#include <vector>
-#include <cstdint>
 
-// 包含核心头文件
-#include "comtrade/types.hpp"
-#include "comtrade/stream_writer.hpp"
+#include <cstdint>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <stdexcept>
+#include <string>
+#include <system_error>
+#include <type_traits>
+#include <vector>
+
+#include "comtrade/record.hpp"
 #include "comtrade/stream_reader.hpp"
+#include "comtrade/stream_writer.hpp"
+#include "comtrade/types.hpp"
+
+namespace {
 
 namespace fs = std::filesystem;
-using namespace std::chrono;
 
-// 定义 Test Fixture，管理临时文件和通用逻辑
-class ComtradeStreamTest : public ::testing::Test {
+static_assert(!std::is_default_constructible_v<comtrade::StreamReader>);
+static_assert(std::is_constructible_v<comtrade::StreamReader, const std::string&>);
+static_assert(!std::is_convertible_v<std::string, comtrade::StreamReader>);
+
+class StreamEngineTest : public ::testing::Test {
 protected:
-    const std::string cfg_path = "test_stream.cfg";
-    const std::string dat_path = "test_stream.dat";
-
     void SetUp() override {
-        cleanUpFiles();
+        const auto* test_info = ::testing::UnitTest::GetInstance()->current_test_info();
+        test_directory_ = fs::temp_directory_path() /
+                          (std::string("comtrade_") + test_info->test_suite_name() + "_" + test_info->name());
+
+        std::error_code error;
+        fs::remove_all(test_directory_, error);
+        ASSERT_TRUE(fs::create_directories(test_directory_));
+        cfg_path_ = test_directory_ / "samples.cfg";
+        dat_path_ = test_directory_ / "samples.dat";
     }
 
     void TearDown() override {
-        cleanUpFiles();
+        std::error_code error;
+        fs::remove_all(test_directory_, error);
     }
 
-    void cleanUpFiles() {
-        if (fs::exists(cfg_path)) fs::remove(cfg_path);
-        if (fs::exists(dat_path)) fs::remove(dat_path);
-    }
-
-    // 构造模拟的 CfgData 元数据
-    static comtrade::CfgData createDummyCfg(const std::string& format) {
+    static comtrade::CfgData makeCfg(comtrade::DataType data_type,
+                                     std::size_t analog_count,
+                                     std::size_t digital_count) {
         comtrade::CfgData cfg;
-        cfg.station_name = "Substation_A";
-        cfg.rec_dev_id = "Relay_1";
+        cfg.data_type = data_type;
 
-        // 使用逐个字段赋值的方式，彻底避免不同编译器对 {} 聚合初始化的严苛限制报错
-        comtrade::AnalogChannel ach;
-        ach.index = 1;
-        ach.id = "Va";
-        ach.phase = "PhaseA";
-        ach.ccbm = "";
-        ach.uu = "V";
-        ach.a = 1.0;
-        ach.b = 0.0;
-        ach.skew = 0.0;
-        ach.min = -1000;
-        ach.max = 1000;
-        ach.primary = 1.0;
-        ach.secondary = 1.0;
-        ach.ps = "S";
-        cfg.analog_channels.push_back(ach);
+        for (std::size_t i = 0; i < analog_count; ++i) {
+            comtrade::AnalogChannel channel;
+            channel.index = static_cast<int>(i + 1);
+            channel.id = "A" + std::to_string(i + 1);
+            cfg.analog_channels.push_back(channel);
+        }
 
-        comtrade::DigitalChannel dch;
-        dch.index = 1;
-        dch.id = "CB1_Status";
-        dch.phase = "Breaker";
-        dch.ccbm = "";
-        dch.normal_state = 0;
-        cfg.digital_channels.push_back(dch);
+        for (std::size_t i = 0; i < digital_count; ++i) {
+            comtrade::DigitalChannel channel;
+            channel.index = static_cast<int>(i + 1);
+            channel.id = "D" + std::to_string(i + 1);
+            cfg.digital_channels.push_back(channel);
+        }
 
-        cfg.analog_count = 1;
-        cfg.digital_count = 1;
-        cfg.total_channels = 2;
-
-        // 调用我们刚刚新增的工具类转换格式
-        cfg.data_type = comtrade::DataTypeUtils::FromString(format);
+        cfg.analog_count = static_cast<int>(analog_count);
+        cfg.digital_count = static_cast<int>(digital_count);
+        cfg.total_channels = cfg.analog_count + cfg.digital_count;
         return cfg;
     }
+
+    static std::string readTextFile(const fs::path& path) {
+        std::ifstream input(path, std::ios::binary);
+        return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+    }
+
+    static std::vector<char> readBinaryFile(const fs::path& path) {
+        std::ifstream input(path, std::ios::binary);
+        return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+    }
+
+    template <typename T>
+    static T readValue(const std::vector<char>& bytes, std::size_t offset) {
+        T value{};
+        EXPECT_LE(offset + sizeof(T), bytes.size());
+        if (offset + sizeof(T) <= bytes.size()) {
+            std::memcpy(&value, bytes.data() + offset, sizeof(T));
+        }
+        return value;
+    }
+
+    fs::path test_directory_;
+    fs::path cfg_path_;
+    fs::path dat_path_;
 };
 
-// =========================================================================
-// 测试 1：ASCII 格式的流式连续多行读写完整性
-// =========================================================================
-TEST_F(ComtradeStreamTest, AsciiContinuousStreamRoundTrip) {
-    auto cfg = createDummyCfg("ASCII");
-    auto base_time = system_clock::now();
-    const int total_rows = 100; // 模拟连续写入和读取 100 行流数据
+TEST_F(StreamEngineTest, PushRowRequiresAnOpenStream) {
+    comtrade::StreamWriter writer(makeCfg(comtrade::DataType::ASCII, 0, 0));
 
-    // 1. 测试流式写入
-    {
-        comtrade::StreamWriter writer(cfg_path, dat_path, cfg);
-
-        for (int i = 0; i < total_rows; ++i) {
-            // 模拟连续的数据变化
-            double analog_val = 220.5 + i * 0.1;
-            uint32_t digital_val = i % 2; // 0和1交替
-
-            auto ts = base_time + microseconds(i * 100); // 模拟时间戳递增
-            bool write_ok = writer.writeRow(ts, {analog_val}, {digital_val});
-            ASSERT_TRUE(write_ok) << "Failed to write row " << i;
-        }
-    } // 离开作用域，writer 析构，确保文件流关闭且 cfg 尾部信息写入完成
-
-    // 2. 测试流式读取
-    {
-        comtrade::StreamReader reader(cfg_path, dat_path);
-
-        // 验证元数据解析
-        auto read_cfg = reader.getCfg();
-        EXPECT_EQ(read_cfg.station_name, "Substation_A");
-        EXPECT_EQ(read_cfg.data_type, comtrade::DataType::ASCII); // 已修正：检查 data_type
-
-        comtrade::TimePoint read_ts;
-        std::vector<double> read_analogs;
-        std::vector<uint32_t> read_digitals;
-
-        int rows_read = 0;
-        // 验证游标式的连续读取
-        while (reader.readNext(read_ts, read_analogs, read_digitals)) {
-            EXPECT_EQ(read_analogs.size(), 1);
-            EXPECT_EQ(read_digitals.size(), 1);
-
-            double expected_analog = 220.5 + rows_read * 0.1;
-            uint32_t expected_digital = rows_read % 2;
-
-            // 重要：ASCII格式存在字符串来回转换，使用 EXPECT_NEAR 容忍微小精度误差
-            EXPECT_NEAR(read_analogs[0], expected_analog, 1e-4) << "Mismatch at row " << rows_read;
-            EXPECT_EQ(read_digitals[0], expected_digital) << "Mismatch at row " << rows_read;
-
-            rows_read++;
-        }
-
-        // 确保读出的行数与写入的完全一致
-        EXPECT_EQ(rows_read, total_rows) << "StreamReader did not read the expected number of rows.";
-    }
+    EXPECT_THROW(writer.pushRow(0, {}, {}), std::runtime_error);
 }
 
-// =========================================================================
-// 测试 2：BINARY 格式的流式连续多行读写完整性
-// =========================================================================
-TEST_F(ComtradeStreamTest, BinaryContinuousStreamRoundTrip) {
-    auto cfg = createDummyCfg("BINARY");
-    auto base_time = system_clock::now();
-    const int total_rows = 500; // Binary 格式测试更大的数据量
+TEST_F(StreamEngineTest, WritesAsciiRowsWithSequentialIndexesAndScaledAnalogValues) {
+    auto cfg = makeCfg(comtrade::DataType::ASCII, 2, 3);
+    cfg.analog_channels[0].a = 0.5;
+    cfg.analog_channels[0].b = -1.0;
+    cfg.analog_channels[1].a = 2.0;
+    cfg.analog_channels[1].b = 5.0;
 
-    // 1. 测试流式写入
-    {
-        comtrade::StreamWriter writer(cfg_path, dat_path, cfg);
-        for (int i = 0; i < total_rows; ++i) {
-            // 测试负数和零等边界值
-            double analog_val = -150.25 - i * 0.5;
-            uint32_t digital_val = (i % 3 == 0) ? 1 : 0;
+    comtrade::StreamWriter writer(cfg);
+    ASSERT_TRUE(writer.open(dat_path_.string()));
 
-            auto ts = base_time + microseconds(i * 250);
-            writer.writeRow(ts, {analog_val}, {digital_val});
-        }
-    }
+    writer.pushRow(100, {10.0, -3.0}, {true, false, true});
+    writer.pushRow(250, {-1.0, 9.0}, {false, true, false});
+    writer.close();
 
-    // 2. 测试流式读取
-    {
-        comtrade::StreamReader reader(cfg_path, dat_path);
-        EXPECT_EQ(reader.getCfg().data_type, comtrade::DataType::BINARY);
-
-        comtrade::TimePoint read_ts;
-        std::vector<double> read_analogs;
-        std::vector<uint32_t> read_digitals;
-
-        int rows_read = 0;
-        while (reader.readNext(read_ts, read_analogs, read_digitals)) {
-            double expected_analog = -150.25 - rows_read * 0.5;
-            uint32_t expected_digital = (rows_read % 3 == 0) ? 1 : 0;
-
-            // 二进制格式 (BINARY) 直接读写字节，不应有精度损失，使用 DOUBLE_EQ 严格断言
-            EXPECT_DOUBLE_EQ(read_analogs[0], expected_analog);
-            EXPECT_EQ(read_digitals[0], expected_digital);
-
-            rows_read++;
-        }
-
-        EXPECT_EQ(rows_read, total_rows);
-    }
+    EXPECT_EQ(readTextFile(dat_path_),
+              "1,100,22,-4,1,0,1\n"
+              "2,250,0,2,0,1,0\n");
 }
+
+TEST_F(StreamEngineTest, WritesBinaryRowsUsingInt16AnalogsAndPackedDigitalWords) {
+    auto cfg = makeCfg(comtrade::DataType::BINARY, 2, 17);
+    cfg.analog_channels[0].a = 0.25;
+    cfg.analog_channels[0].b = 1.0;
+    cfg.analog_channels[1].a = 2.0;
+    cfg.analog_channels[1].b = -5.0;
+
+    std::vector<bool> digitals(17, false);
+    digitals[0] = true;
+    digitals[3] = true;
+    digitals[15] = true;
+    digitals[16] = true;
+
+    comtrade::StreamWriter writer(cfg);
+    ASSERT_TRUE(writer.open(dat_path_.string()));
+    writer.pushRow(123456, {3.5, -1.0}, digitals);
+    writer.close();
+
+    const auto bytes = readBinaryFile(dat_path_);
+    ASSERT_EQ(bytes.size(), 16U);  // index + timestamp + 2 analogs + 2 digital words
+    EXPECT_EQ(readValue<std::uint32_t>(bytes, 0), 1U);
+    EXPECT_EQ(readValue<std::uint32_t>(bytes, 4), 123456U);
+    EXPECT_EQ(readValue<std::int16_t>(bytes, 8), 10);
+    EXPECT_EQ(readValue<std::int16_t>(bytes, 10), 2);
+    EXPECT_EQ(readValue<std::uint16_t>(bytes, 12), 0x8009U);
+    EXPECT_EQ(readValue<std::uint16_t>(bytes, 14), 0x0001U);
+}
+
+TEST_F(StreamEngineTest, WritesBinary32RowsUsingInt32Analogs) {
+    auto cfg = makeCfg(comtrade::DataType::BINARY32, 1, 0);
+    cfg.analog_channels[0].a = 0.001;
+    cfg.analog_channels[0].b = -10.0;
+
+    comtrade::StreamWriter writer(cfg);
+    ASSERT_TRUE(writer.open(dat_path_.string()));
+    writer.pushRow(42, {123446.789}, {});
+    writer.pushRow(84, {-10.0}, {});
+    writer.close();
+
+    const auto bytes = readBinaryFile(dat_path_);
+    ASSERT_EQ(bytes.size(), 24U);
+    EXPECT_EQ(readValue<std::uint32_t>(bytes, 0), 1U);
+    EXPECT_EQ(readValue<std::uint32_t>(bytes, 4), 42U);
+    EXPECT_EQ(readValue<std::int32_t>(bytes, 8), 123456789);
+    EXPECT_EQ(readValue<std::uint32_t>(bytes, 12), 2U);
+    EXPECT_EQ(readValue<std::uint32_t>(bytes, 16), 84U);
+    EXPECT_EQ(readValue<std::int32_t>(bytes, 20), 0);
+}
+
+TEST_F(StreamEngineTest, ReaderReturnsZeroWhenTheDatFileCannotBeOpened) {
+    comtrade::Record generated_record;
+    generated_record.setStationAndDevice("GRID_01", "RELAY_01");
+    ASSERT_TRUE(generated_record.saveCfg(cfg_path_.string()));
+
+    comtrade::StreamReader reader(cfg_path_.string());
+    std::size_t callback_count = 0;
+
+    const auto row_count = reader.processDatStream(
+        (test_directory_ / "missing.dat").string(),
+        [&](const comtrade::SampleRow&) { ++callback_count; });
+
+    EXPECT_EQ(row_count, 0U);
+    EXPECT_EQ(callback_count, 0U);
+}
+
+TEST_F(StreamEngineTest, ReaderConstructorRejectsMissingOrMalformedCfg) {
+    EXPECT_THROW(
+        static_cast<void>(comtrade::StreamReader((test_directory_ / "missing.cfg").string())),
+        std::runtime_error);
+
+    {
+        std::ofstream malformed_cfg(cfg_path_);
+        ASSERT_TRUE(malformed_cfg.is_open());
+        malformed_cfg << "this is not a COMTRADE configuration\n";
+    }
+
+    EXPECT_THROW(static_cast<void>(comtrade::StreamReader(cfg_path_.string())), std::runtime_error);
+}
+
+TEST_F(StreamEngineTest, GeneratesComtradeFilesAndStreamsEverySample) {
+    comtrade::Record generated_record;
+    generated_record.setStationAndDevice("GRID_01", "RELAY_01", comtrade::StandardVersion::V1999);
+
+    comtrade::AnalogChannel voltage;
+    voltage.index = 1;
+    voltage.id = "VA";
+    voltage.phase = "A";
+    voltage.uu = "V";
+    voltage.a = 0.1;
+    voltage.b = -5.0;
+    generated_record.addAnalogChannel(voltage);
+
+    comtrade::AnalogChannel current;
+    current.index = 2;
+    current.id = "IA";
+    current.phase = "A";
+    current.uu = "A";
+    current.a = 0.01;
+    generated_record.addAnalogChannel(current);
+
+    comtrade::DigitalChannel trip;
+    trip.index = 1;
+    trip.id = "TRIP";
+    generated_record.addDigitalChannel(trip);
+
+    comtrade::DigitalChannel breaker_closed;
+    breaker_closed.index = 2;
+    breaker_closed.id = "BREAKER_CLOSED";
+    breaker_closed.normal_state = 1;
+    generated_record.addDigitalChannel(breaker_closed);
+
+    generated_record.addSample(0, {220.0, 5.25}, {false, true});
+    generated_record.addSample(250, {221.2, -1.5}, {true, false});
+    generated_record.addSample(500, {-5.0, 0.0}, {true, true});
+    generated_record.getMutableCfg().data_type = comtrade::DataType::ASCII;
+
+    ASSERT_TRUE(generated_record.saveCfg(cfg_path_.string()));
+    ASSERT_TRUE(generated_record.saveDat(dat_path_.string()));
+    ASSERT_TRUE(fs::exists(cfg_path_));
+    ASSERT_TRUE(fs::exists(dat_path_));
+
+    comtrade::StreamReader reader(cfg_path_.string());
+    EXPECT_EQ(reader.getCfg().station_name, "GRID_01");
+    EXPECT_EQ(reader.getCfg().rec_dev_id, "RELAY_01");
+    EXPECT_EQ(reader.getCfg().analog_count, 2);
+    EXPECT_EQ(reader.getCfg().digital_count, 2);
+
+    std::vector<comtrade::SampleRow> rows;
+    const comtrade::SampleRow* reused_row = nullptr;
+    const auto row_count = reader.processDatStream(dat_path_.string(), [&](const comtrade::SampleRow& row) {
+        if (reused_row == nullptr) {
+            reused_row = &row;
+        } else {
+            EXPECT_EQ(&row, reused_row);
+        }
+        rows.push_back(row);
+    });
+
+    EXPECT_EQ(row_count, 3U);
+    ASSERT_EQ(rows.size(), 3U);
+
+    EXPECT_EQ(rows[0].index, 1U);
+    EXPECT_EQ(rows[0].timestamp_us, 0U);
+    EXPECT_NEAR(rows[0].analog_values[0], 220.0, 1e-9);
+    EXPECT_NEAR(rows[0].analog_values[1], 5.25, 1e-9);
+    EXPECT_FALSE(rows[0].digital_values[0]);
+    EXPECT_TRUE(rows[0].digital_values[1]);
+
+    EXPECT_EQ(rows[1].index, 2U);
+    EXPECT_EQ(rows[1].timestamp_us, 250U);
+    EXPECT_NEAR(rows[1].analog_values[0], 221.2, 1e-9);
+    EXPECT_NEAR(rows[1].analog_values[1], -1.5, 1e-9);
+    EXPECT_TRUE(rows[1].digital_values[0]);
+    EXPECT_FALSE(rows[1].digital_values[1]);
+
+    EXPECT_EQ(rows[2].index, 3U);
+    EXPECT_EQ(rows[2].timestamp_us, 500U);
+    EXPECT_NEAR(rows[2].analog_values[0], -5.0, 1e-9);
+    EXPECT_NEAR(rows[2].analog_values[1], 0.0, 1e-9);
+    EXPECT_TRUE(rows[2].digital_values[0]);
+    EXPECT_TRUE(rows[2].digital_values[1]);
+}
+
+}  // namespace
