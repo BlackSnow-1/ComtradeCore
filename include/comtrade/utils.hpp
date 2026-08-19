@@ -38,7 +38,7 @@ namespace comtrade::utils {
      * @brief 将纳秒级 TimePoint 格式化为 COMTRADE 时间字符串
      * @return 格式为: dd/mm/yyyy,hh:mm:ss.sssssssss
      */
-    inline std::string formatTime(const TimePoint &tp) {
+    inline std::string formatTime(const TimePoint &tp, uint8_t fractional_digits = 9) {
         // 提取秒级部分
         auto secs = std::chrono::time_point_cast<std::chrono::seconds>(tp);
         // 提取纳秒余数部分
@@ -58,10 +58,30 @@ namespace comtrade::utils {
         // 格式化基础时间 dd/mm/yyyy,hh:mm:ss
         std::strftime(buf, sizeof(buf), "%d/%m/%Y,%H:%M:%S", &tm_buf);
 
+        const auto digits = std::min<uint8_t>(fractional_digits, 9);
         std::ostringstream oss;
-        // 拼接纳秒部分，使用 0 填充至 9 位
-        oss << buf << "." << std::setfill('0') << std::setw(9) << ns;
+        oss << buf;
+        if (digits > 0) {
+            static constexpr int64_t divisors[] = {
+                1000000000LL, 100000000LL, 10000000LL, 1000000LL, 100000LL,
+                10000LL, 1000LL, 100LL, 10LL, 1LL
+            };
+            const auto fraction = ns / divisors[digits];
+            oss << "." << std::setfill('0') << std::setw(digits) << fraction;
+        }
         return oss.str();
+    }
+
+    inline uint8_t fractionalSecondDigits(const std::string& time_str) {
+        const auto dot = time_str.find('.');
+        if (dot == std::string::npos) return 0;
+
+        uint8_t digits = 0;
+        for (auto i = dot + 1; i < time_str.size() && digits < 9; ++i) {
+            if (!std::isdigit(static_cast<unsigned char>(time_str[i]))) break;
+            ++digits;
+        }
+        return digits;
     }
 
     /**
