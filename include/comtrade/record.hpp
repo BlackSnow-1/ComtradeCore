@@ -92,24 +92,24 @@ namespace comtrade {
                 return false;
             }
 
-            std::ofstream out(filepath);
+            std::ofstream out(filepath, std::ios::binary);
             if (!out.is_open()) return false;
             out << std::setprecision(15);
 
-            out << cfg_.station_name << "," << cfg_.rec_dev_id << "," << static_cast<int>(cfg_.version) << "\n";
-            out << cfg_.total_channels << "," << cfg_.analog_count << "A," << cfg_.digital_count << "D\n";
+            out << cfg_.station_name << "," << cfg_.rec_dev_id << "," << static_cast<int>(cfg_.version) << "\r\n";
+            out << cfg_.total_channels << "," << cfg_.analog_count << "A," << cfg_.digital_count << "D\r\n";
 
             for (const auto &ac: cfg_.analog_channels) {
                 out << ac.index << "," << ac.id << "," << ac.phase << "," << ac.ccbm << ","
                         << ac.uu << "," << ac.a << "," << ac.b << "," << ac.skew << ","
-                        << ac.min << "," << ac.max << "," << ac.primary << "," << ac.secondary << "," << ac.ps << "\n";
+                        << ac.min << "," << ac.max << "," << ac.primary << "," << ac.secondary << "," << ac.ps << "\r\n";
             }
 
             for (const auto &dc: cfg_.digital_channels) {
-                out << dc.index << "," << dc.id << "," << dc.phase << "," << dc.ccbm << "," << dc.normal_state << "\n";
+                out << dc.index << "," << dc.id << "," << dc.phase << "," << dc.ccbm << "," << dc.normal_state << "\r\n";
             }
 
-            out << cfg_.line_frequency << "\n";
+            out << cfg_.line_frequency << "\r\n";
             auto sample_rates = cfg_.sample_rates;
             if (sample_rates.empty()) {
                 double sample_rate = 0.0;
@@ -119,20 +119,20 @@ namespace comtrade {
                 sample_rates.push_back({sample_rate, static_cast<uint32_t>(data_.timestamp.size())});
             }
 
-            out << sample_rates.size() << "\n";
+            out << sample_rates.size() << "\r\n";
             for (const auto& sample_rate : sample_rates) {
-                out << sample_rate.samples_per_second << "," << sample_rate.end_sample << "\n";
+                out << sample_rate.samples_per_second << "," << sample_rate.end_sample << "\r\n";
             }
-            out << utils::formatTime(cfg_.start_time, cfg_.timestamp_fractional_digits) << "\n";
-            out << utils::formatTime(cfg_.trigger_time, cfg_.timestamp_fractional_digits) << "\n";
-            out << DataTypeUtils::ToString(cfg_.data_type) << "\n";
+            out << utils::formatTime(cfg_.start_time, cfg_.timestamp_fractional_digits) << "\r\n";
+            out << utils::formatTime(cfg_.trigger_time, cfg_.timestamp_fractional_digits) << "\r\n";
+            out << DataTypeUtils::ToString(cfg_.data_type) << "\r\n";
 
             if (cfg_.version != StandardVersion::V1991) {
-                out << cfg_.time_multiplier << "\n";
+                out << cfg_.time_multiplier << "\r\n";
             }
             if (cfg_.version == StandardVersion::V2013) {
-                out << cfg_.time_code << "," << cfg_.local_code << "\n";
-                out << cfg_.time_quality_code << "," << cfg_.leap_second << "\n";
+                out << cfg_.time_code << "," << cfg_.local_code << "\r\n";
+                out << cfg_.time_quality_code << "," << cfg_.leap_second << "\r\n";
             }
 
             return true;
@@ -142,7 +142,7 @@ namespace comtrade {
             if (cfg_.data_type != DataType::ASCII) return false;
             if (!std::isfinite(cfg_.time_multiplier) || cfg_.time_multiplier <= 0.0) return false;
 
-            std::ofstream out(filepath);
+            std::ofstream out(filepath, std::ios::binary);
             if (!out.is_open()) return false;
 
             size_t num_samples = data_.timestamp.size();
@@ -163,7 +163,7 @@ namespace comtrade {
                 for (size_t j = 0; j < static_cast<size_t>(cfg_.digital_count); ++j) {
                     out << "," << (data_.digital_values[j][i] ? 1 : 0);
                 }
-                out << "\n";
+                out << "\r\n";
             }
             return true;
         }
