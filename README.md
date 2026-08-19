@@ -1,5 +1,7 @@
 # ComtradeCore
 
+[![CI](https://github.com/BlackSnow-1/ComtradeCore/actions/workflows/ci.yml/badge.svg)](https://github.com/BlackSnow-1/ComtradeCore/actions/workflows/ci.yml)
+
 ComtradeCore 是一个轻量、Header-only 的 C++17 COMTRADE 库，用于构造、写入和流式读取电力系统暂态记录。
 核心库只依赖 C++ 标准库。
 
@@ -246,6 +248,17 @@ ctest --test-dir build -C Debug --output-on-failure
 ```text
 StreamEngineTest.GeneratesComtradeFilesAndStreamsEverySample
 ```
+
+### GitHub Actions 自动测试
+
+`.github/workflows/ci.yml` 会在推送到 `main`、创建或更新 Pull Request，以及手动触发时运行。
+自动化流程覆盖 Linux GCC、Linux Clang 和 Windows MSVC，并执行：
+
+1. 配置和编译库、示例及 GoogleTest 测试。
+2. 通过 CTest 运行全部单元测试。
+3. 安装 ComtradeCore 到临时 staging 目录。
+4. 使用独立消费者项目验证 `find_package(ComtradeCore CONFIG REQUIRED)`。
+5. 上传保留 7 天的安装包构件。
 
 ## 目录结构
 
