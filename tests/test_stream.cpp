@@ -70,7 +70,7 @@ namespace {
         }
 
         static std::string readTextFile(const fs::path &path) {
-            std::ifstream input(path, std::ios::binary);
+            std::ifstream input(path);
             return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
         }
 
