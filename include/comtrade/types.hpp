@@ -6,6 +6,7 @@
 #pragma once
 
 #include <chrono>
+#include <cmath>
 #include <string>
 #include <vector>
 #include <cstdint>
@@ -101,6 +102,11 @@ namespace comtrade {
         int normal_state = 0;
     };
 
+    struct SampleRate {
+        double samples_per_second = 0.0;
+        uint32_t end_sample = 0;
+    };
+
     struct CfgData {
         std::string station_name; /* 厂站名 */
         std::string rec_dev_id; /* 设备ID */
@@ -115,6 +121,21 @@ namespace comtrade {
 
         double line_frequency = 50.0;
         DataType data_type = DataType::ASCII;
+
+        // COMTRADE sampling and timestamp metadata.
+        std::vector<SampleRate> sample_rates;
+        double time_multiplier = 1.0;
+
+        // IEEE/IEC C37.111-2013 time metadata. These two CFG lines are emitted
+        // only for revision 2013 records.
+        std::string time_code = "UTC";
+        std::string local_code = "+0";
+        std::string time_quality_code = "F";
+        int leap_second = 0;
+
+        // Number of fractional second digits used when serializing CFG time
+        // fields. TimePoint itself retains nanosecond precision.
+        uint8_t timestamp_fractional_digits = 9;
 
         // 使用 chrono::time_point 替代原来的 std::string
         TimePoint start_time{};
