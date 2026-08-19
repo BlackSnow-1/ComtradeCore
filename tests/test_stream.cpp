@@ -70,7 +70,7 @@ namespace {
         }
 
         static std::string readTextFile(const fs::path &path) {
-            std::ifstream input(path);
+            std::ifstream input(path, std::ios::binary);
             return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
         }
 
@@ -115,8 +115,8 @@ namespace {
         writer.close();
 
         EXPECT_EQ(readTextFile(dat_path_),
-                  "1,100,22,-4,1,0,1\n"
-                  "2,250,0,2,0,1,0\n");
+                  "1,100,22,-4,1,0,1\r\n"
+                  "2,250,0,2,0,1,0\r\n");
     }
 
     TEST_F(StreamEngineTest, WritesBinaryRowsUsingInt16AnalogsAndPackedDigitalWords) {
@@ -328,10 +328,10 @@ namespace {
         ASSERT_TRUE(generated_record.saveDat(dat_path_.string()));
 
         const auto cfg_text = readTextFile(cfg_path_);
-        EXPECT_NE(cfg_text.find("GRID_2013,RELAY_2013,2013\n"), std::string::npos);
-        EXPECT_NE(cfg_text.find("19/08/2026,12:34:56.123456789\n"), std::string::npos);
-        EXPECT_NE(cfg_text.find("4000,2\n"), std::string::npos);
-        EXPECT_NE(cfg_text.find("ASCII\n0.001\nUTC,+0800\n4,1\n"), std::string::npos);
+        EXPECT_NE(cfg_text.find("GRID_2013,RELAY_2013,2013\r\n"), std::string::npos);
+        EXPECT_NE(cfg_text.find("19/08/2026,12:34:56.123456789\r\n"), std::string::npos);
+        EXPECT_NE(cfg_text.find("4000,2\r\n"), std::string::npos);
+        EXPECT_NE(cfg_text.find("ASCII\r\n0.001\r\nUTC,+0800\r\n4,1\r\n"), std::string::npos);
 
         comtrade::StreamReader reader(cfg_path_.string());
         const auto &parsed_cfg = reader.getCfg();
