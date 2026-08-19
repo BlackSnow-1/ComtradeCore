@@ -10,6 +10,7 @@ ComtradeCore 是一个轻量、Header-only 的 C++17 COMTRADE 库，用于构造
 - 使用 `Record` 在内存中构造记录并生成 CFG、DAT 文件。
 - 使用 `StreamWriter` 写入 ASCII、BINARY、BINARY32 和 FLOAT32 DAT 数据。
 - 使用 `StreamReader` 逐采样读取 ASCII DAT，避免一次性加载完整文件。
+- 生成的 CFG 和 ASCII DAT 在所有平台统一使用 COMTRADE CRLF 行结束符。
 - 支持 IEEE C37.111 的 1991、1999 和 2013 版本标识。
 - 提供可安装的 CMake package，安装后可通过 `find_package()` 使用。
 
