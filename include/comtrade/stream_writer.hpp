@@ -29,12 +29,12 @@ namespace comtrade {
         }
 
         bool open(const std::string &dat_filepath) {
-            std::ios_base::openmode mode = std::ios::out;
+            // Use binary mode for every DAT type so ASCII line endings are
+            // emitted exactly as COMTRADE CRLF on every platform.
+            std::ios_base::openmode mode = std::ios::out | std::ios::binary;
 
             if (cfg_.data_type == DataType::BINARY || cfg_.data_type == DataType::BINARY32 ||
                 cfg_.data_type == DataType::FLOAT32) {
-                mode |= std::ios::binary;
-
                 // 预计算数字量需要多少个 16-bit word (向上取整)
                 digital_word_count_ = (cfg_.digital_channels.size() + 15) / 16;
 
@@ -94,7 +94,7 @@ namespace comtrade {
                 dat_file_ << "," << raw_val;
             }
             for (const bool val: d_vals) dat_file_ << "," << (val ? 1 : 0);
-            dat_file_ << "\n";
+            dat_file_ << "\r\n";
         }
 
         // 核心性能点：单行二进制直接打包与落盘
