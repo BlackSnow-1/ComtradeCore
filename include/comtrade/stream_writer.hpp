@@ -6,6 +6,7 @@
 #include <vector>
 #include <cmath>
 #include <cstring> // for std::memcpy
+#include <limits>
 #include <stdexcept>
 
 namespace comtrade {
@@ -30,7 +31,8 @@ namespace comtrade {
         bool open(const std::string &dat_filepath) {
             std::ios_base::openmode mode = std::ios::out;
 
-            if (cfg_.data_type == DataType::BINARY || cfg_.data_type == DataType::BINARY32) {
+            if (cfg_.data_type == DataType::BINARY || cfg_.data_type == DataType::BINARY32 ||
+                cfg_.data_type == DataType::FLOAT32) {
                 mode |= std::ios::binary;
 
                 // 预计算数字量需要多少个 16-bit word (向上取整)
@@ -58,11 +60,19 @@ namespace comtrade {
                      const std::vector<double> &analog_values,
                      const std::vector<bool> &digital_values) {
             if (!dat_file_.is_open()) throw std::runtime_error("DAT stream not open.");
+            if (!std::isfinite(cfg_.time_multiplier) || cfg_.time_multiplier <= 0.0) {
+                throw std::invalid_argument("COMTRADE time multiplier must be positive and finite.");
+            }
+
+            const auto raw_timestamp = std::llround(timestamp_us / cfg_.time_multiplier);
+            if (raw_timestamp < 0 || raw_timestamp > std::numeric_limits<uint32_t>::max()) {
+                throw std::overflow_error("COMTRADE raw timestamp exceeds uint32 range.");
+            }
 
             if (cfg_.data_type == DataType::ASCII) {
-                writeAsciiRow(timestamp_us, analog_values, digital_values);
+                writeAsciiRow(static_cast<uint32_t>(raw_timestamp), analog_values, digital_values);
             } else {
-                writeBinaryRow(timestamp_us, analog_values, digital_values);
+                writeBinaryRow(static_cast<uint32_t>(raw_timestamp), analog_values, digital_values);
             }
 
             current_row_index_++;
@@ -105,9 +115,12 @@ namespace comtrade {
                     auto raw_val = static_cast<int16_t>(std::round((a_vals[i] - ch.b) / ch.a));
                     std::memcpy(ptr, &raw_val, 2);
                     ptr += 2;
-                } else {
-                    // BINARY32
+                } else if (cfg_.data_type == DataType::BINARY32) {
                     auto raw_val = static_cast<int32_t>(std::round((a_vals[i] - ch.b) / ch.a));
+                    std::memcpy(ptr, &raw_val, 4);
+                    ptr += 4;
+                } else {
+                    const auto raw_val = static_cast<float>((a_vals[i] - ch.b) / ch.a);
                     std::memcpy(ptr, &raw_val, 4);
                     ptr += 4;
                 }
