@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -167,6 +168,24 @@ namespace {
         EXPECT_EQ(readValue<std::int32_t>(bytes, 20), 0);
     }
 
+    TEST_F(StreamEngineTest, WritesFloat32RowsAndAppliesTheTimeMultiplier) {
+        auto cfg = makeCfg(comtrade::DataType::FLOAT32, 1, 0);
+        cfg.analog_channels[0].a = 0.5;
+        cfg.analog_channels[0].b = 1.0;
+        cfg.time_multiplier = 0.001;
+
+        comtrade::StreamWriter writer(cfg);
+        ASSERT_TRUE(writer.open(dat_path_.string()));
+        writer.pushRow(250, {3.5}, {});
+        writer.close();
+
+        const auto bytes = readBinaryFile(dat_path_);
+        ASSERT_EQ(bytes.size(), 12U);
+        EXPECT_EQ(readValue<std::uint32_t>(bytes, 0), 1U);
+        EXPECT_EQ(readValue<std::uint32_t>(bytes, 4), 250000U);
+        EXPECT_FLOAT_EQ(readValue<float>(bytes, 8), 5.0F);
+    }
+
     TEST_F(StreamEngineTest, ReaderReturnsZeroWhenTheDatFileCannotBeOpened) {
         comtrade::Record generated_record;
         generated_record.setStationAndDevice("GRID_01", "RELAY_01");
@@ -277,5 +296,62 @@ namespace {
         EXPECT_NEAR(rows[2].analog_values[1], 0.0, 1e-9);
         EXPECT_TRUE(rows[2].digital_values[0]);
         EXPECT_TRUE(rows[2].digital_values[1]);
+    }
+
+    TEST_F(StreamEngineTest, Comtrade2013CfgPreservesPreciseTimeMetadata) {
+        comtrade::Record generated_record;
+        generated_record.setStationAndDevice("GRID_2013", "RELAY_2013", comtrade::StandardVersion::V2013);
+
+        comtrade::AnalogChannel voltage;
+        voltage.index = 1;
+        voltage.id = "VA";
+        voltage.uu = "V";
+        voltage.a = 0.1;
+        generated_record.addAnalogChannel(voltage);
+        generated_record.addSample(0, {220.0}, {});
+        generated_record.addSample(250, {221.0}, {});
+        generated_record.setTimestamps(
+            "19/08/2026,12:34:56.123456789",
+            "19/08/2026,12:34:56.123706789");
+
+        auto &cfg = generated_record.getMutableCfg();
+        cfg.data_type = comtrade::DataType::ASCII;
+        cfg.sample_rates = {{4000.0, 2}};
+        cfg.time_multiplier = 0.001;
+        cfg.time_code = "UTC";
+        cfg.local_code = "+0800";
+        cfg.time_quality_code = "4";
+        cfg.leap_second = 1;
+        cfg.timestamp_fractional_digits = 9;
+
+        ASSERT_TRUE(generated_record.saveCfg(cfg_path_.string()));
+        ASSERT_TRUE(generated_record.saveDat(dat_path_.string()));
+
+        const auto cfg_text = readTextFile(cfg_path_);
+        EXPECT_NE(cfg_text.find("GRID_2013,RELAY_2013,2013\n"), std::string::npos);
+        EXPECT_NE(cfg_text.find("19/08/2026,12:34:56.123456789\n"), std::string::npos);
+        EXPECT_NE(cfg_text.find("4000,2\n"), std::string::npos);
+        EXPECT_NE(cfg_text.find("ASCII\n0.001\nUTC,+0800\n4,1\n"), std::string::npos);
+
+        comtrade::StreamReader reader(cfg_path_.string());
+        const auto &parsed_cfg = reader.getCfg();
+        EXPECT_EQ(parsed_cfg.version, comtrade::StandardVersion::V2013);
+        ASSERT_EQ(parsed_cfg.sample_rates.size(), 1U);
+        EXPECT_DOUBLE_EQ(parsed_cfg.sample_rates[0].samples_per_second, 4000.0);
+        EXPECT_EQ(parsed_cfg.sample_rates[0].end_sample, 2U);
+        EXPECT_DOUBLE_EQ(parsed_cfg.time_multiplier, 0.001);
+        EXPECT_EQ(parsed_cfg.time_code, "UTC");
+        EXPECT_EQ(parsed_cfg.local_code, "+0800");
+        EXPECT_EQ(parsed_cfg.time_quality_code, "4");
+        EXPECT_EQ(parsed_cfg.leap_second, 1);
+        EXPECT_EQ(parsed_cfg.timestamp_fractional_digits, 9);
+
+        std::vector<comtrade::SampleRow> rows;
+        ASSERT_EQ(reader.processDatStream(dat_path_.string(), [&](const auto& row) { rows.push_back(row); }), 2U);
+        ASSERT_EQ(rows.size(), 2U);
+        EXPECT_EQ(rows[1].raw_timestamp, 250000U);
+        EXPECT_EQ(rows[1].timestamp_us, 250U);
+        EXPECT_EQ(rows[1].time_offset, std::chrono::microseconds(250));
+        EXPECT_EQ(rows[1].absolute_time, parsed_cfg.start_time + std::chrono::microseconds(250));
     }
 } // namespace
