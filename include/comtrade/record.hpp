@@ -190,7 +190,7 @@ namespace comtrade {
             cfg_.total_channels++;
         }
 
-        inline void addSample(uint32_t timestamp_us,
+        inline void addSample(const uint32_t timestamp_us,
                               const std::vector<double> &analog_reals,
                               const std::vector<bool> &digital_vals) {
             data_.timestamp.push_back(timestamp_us);
