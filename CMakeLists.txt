@@ -31,11 +31,16 @@ target_include_directories(ComtradeCore INTERFACE
 target_compile_features(ComtradeCore INTERFACE cxx_std_17)
 
 # ==========================================
-# 2. 单元测试配置 (引入 GoogleTest)
+# 2. 构建选项配置
 # ==========================================
-# 优先查找本地系统是否已安装 GTest (QUIET 表示找不到时不报错)
 option(COMTRADE_BUILD_TESTS "Build ComtradeCore unit tests" ${COMTRADE_IS_TOP_LEVEL})
+option(COMTRADE_BUILD_EXAMPLES "Build ComtradeCore examples" ${COMTRADE_IS_TOP_LEVEL})
+# --- 新增的多语言绑定选项 ---
+option(BUILD_JAVA_BINDINGS "Build Java bindings using SWIG" OFF)
 
+# ==========================================
+# 3. 子目录引入配置
+# ==========================================
 if(COMTRADE_BUILD_TESTS)
     enable_testing()
 
@@ -58,16 +63,19 @@ if(COMTRADE_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
-
-option(COMTRADE_BUILD_EXAMPLES "Build ComtradeCore examples" ${COMTRADE_IS_TOP_LEVEL})
-
 if(COMTRADE_BUILD_EXAMPLES)
     message(STATUS "ComtradeCore: Building examples enabled")
     add_subdirectory(examples)
 endif()
 
+# --- 条件引入绑定子模块 ---
+if(BUILD_JAVA_BINDINGS)
+    message(STATUS "ComtradeCore: Building Java bindings enabled")
+    add_subdirectory(bindings/java)
+endif()
+
 # ==========================================
-# 3. 安装与 CMake package 导出
+# 4. 安装与 CMake package 导出
 # ==========================================
 install(TARGETS ComtradeCore
         EXPORT ComtradeCoreTargets
