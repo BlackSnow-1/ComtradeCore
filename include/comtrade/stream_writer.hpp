@@ -1,4 +1,7 @@
-// include/comtrade/stream_writer.hpp
+/**
+ * @file stream_writer.hpp
+ * @brief 顺序写入 ASCII/BINARY/BINARY32/FLOAT32 DAT，避免保存整份波形。
+ */
 #pragma once
 #include "types.hpp"
 #include <fstream>
@@ -10,13 +13,14 @@
 #include <stdexcept>
 
 namespace comtrade {
+    // 构造时复制 CFG，调用方后续修改原 CFG 不会改变当前输出流的列布局。
     class StreamWriter {
     private:
         CfgData cfg_;
         std::ofstream dat_file_;
         uint32_t current_row_index_ = 1;
 
-        // 二进制模式专属：预分配的单行二进制缓冲区
+        // 二进制模式专属：预分配的单行缓冲，pushRow 热路径不再申请内存。
         std::vector<char> row_buffer_;
         size_t digital_word_count_ = 0;
 
@@ -59,6 +63,8 @@ namespace comtrade {
         void pushRow(uint32_t timestamp_us,
                      const std::vector<double> &analog_values,
                      const std::vector<bool> &digital_values) {
+            // 输入时间是相对开始时刻的微秒偏移，DAT 第二列按 TIMEMULT 反算为原始整数。
+            // analog_values/digital_values 的数量必须与 CFG 声明一致。
             if (!dat_file_.is_open()) throw std::runtime_error("DAT stream not open.");
             if (!std::isfinite(cfg_.time_multiplier) || cfg_.time_multiplier <= 0.0) {
                 throw std::invalid_argument("COMTRADE time multiplier must be positive and finite.");
@@ -90,6 +96,7 @@ namespace comtrade {
             dat_file_ << current_row_index_ << "," << ts_us;
             for (size_t i = 0; i < cfg_.analog_channels.size(); ++i) {
                 const auto &ch = cfg_.analog_channels[i];
+                // 工程值写回原始整数：raw = round((value - b) / a)。
                 const auto raw_val = static_cast<int32_t>(std::round((a_vals[i] - ch.b) / ch.a));
                 dat_file_ << "," << raw_val;
             }
@@ -101,7 +108,8 @@ namespace comtrade {
         void writeBinaryRow(uint32_t ts_us, const std::vector<double> &a_vals, const std::vector<bool> &d_vals) {
             char *ptr = row_buffer_.data();
 
-            // 1. 写入序号和时间戳 (直接使用 memcpy 防止未对齐引起的崩溃，编译器会将其优化为高效的单条汇编指令)
+            // 二进制行布局固定为：序号、时间戳、模拟量数组、数字量 word 数组。
+            // memcpy 避免对 char 缓冲区执行潜在未对齐的整数写入。
             std::memcpy(ptr, &current_row_index_, 4);
             ptr += 4;
             std::memcpy(ptr, &ts_us, 4);
