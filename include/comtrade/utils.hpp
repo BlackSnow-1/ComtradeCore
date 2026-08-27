@@ -14,7 +14,8 @@
 #include "types.hpp"
 
 namespace comtrade::utils {
-    // 使用 inline 关键字保证 header-only 兼容性
+    // COMTRADE 是逗号分隔格式；这里同时清除 CRLF 残留和字段两端空白。
+    // 使用 inline 保证该实现可安全放在 Header-only 库中。
     inline std::vector<std::string> split(const std::string &s, const char delimiter = ',') {
         std::vector<std::string> tokens;
         std::string token;
@@ -28,6 +29,7 @@ namespace comtrade::utils {
         return tokens;
     }
 
+    // 未明确标识 1999/2013 的厂商版本按 1991 主体布局处理，尾部扩展由 CFG 解析器兼容。
     inline StandardVersion determineVersion(const std::string &year_str) {
         if (year_str.find("1999") != std::string::npos) return StandardVersion::V1999;
         if (year_str.find("2013") != std::string::npos) return StandardVersion::V2013;
@@ -39,15 +41,14 @@ namespace comtrade::utils {
      * @return 格式为: dd/mm/yyyy,hh:mm:ss.sssssssss
      */
     inline std::string formatTime(const TimePoint &tp, uint8_t fractional_digits = 9) {
-        // 提取秒级部分
+        // 先拆分整秒和纳秒余数，避免浮点格式化造成精度损失。
         auto secs = std::chrono::time_point_cast<std::chrono::seconds>(tp);
-        // 提取纳秒余数部分
         auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(tp - secs).count();
 
         std::time_t t = std::chrono::system_clock::to_time_t(secs);
         std::tm tm_buf;
 
-        // 跨平台线程安全的本地时间转换
+        // CFG 日期字段使用运行机器的本地时区；2013 的时区代码由 CfgData 单独保存。
 #if defined(_WIN32)
         localtime_s(&tm_buf, &t);
 #else
@@ -72,6 +73,7 @@ namespace comtrade::utils {
         return oss.str();
     }
 
+    // 统计输入中实际出现的小数秒位数，最多保留到库支持的纳秒级 9 位。
     inline uint8_t fractionalSecondDigits(const std::string& time_str) {
         const auto dot = time_str.find('.');
         if (dot == std::string::npos) return 0;
@@ -133,6 +135,7 @@ namespace comtrade::utils {
             }
         }
 
+        // mktime 与 formatTime 同样按本地时区工作，确保读写往返采用一致规则。
         const std::time_t t = std::mktime(&tm_buf);
         const auto tp = std::chrono::system_clock::from_time_t(t);
         return std::chrono::time_point_cast<std::chrono::nanoseconds>(tp) + std::chrono::nanoseconds(ns);
