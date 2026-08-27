@@ -24,7 +24,8 @@ namespace comtrade {
 // 回调看到的单个采样点。raw_timestamp 保留 DAT 原值，其余时间字段为换算结果。
 struct SampleRow {
     uint32_t index = 0;
-    uint32_t raw_timestamp = 0;
+    // ASCII DAT files may use values beyond the 32-bit binary timestamp field.
+    uint64_t raw_timestamp = 0;
     uint64_t timestamp_us = 0;
     std::chrono::nanoseconds time_offset{};
     TimePoint absolute_time{};
@@ -65,8 +66,17 @@ public:
             if (tokens.size() < expected_tokens) continue;
 
             try {
-                row_buffer.index = static_cast<uint32_t>(std::stoul(tokens[0]));
-                row_buffer.raw_timestamp = static_cast<uint32_t>(std::stoul(tokens[1]));
+                std::size_t index_characters = 0;
+                std::size_t timestamp_characters = 0;
+                const auto parsed_index = std::stoull(tokens[0], &index_characters);
+                const auto parsed_timestamp = std::stoull(tokens[1], &timestamp_characters);
+                if (tokens[0].empty() || tokens[1].empty() || tokens[0].front() == '-' || tokens[1].front() == '-' ||
+                    index_characters != tokens[0].size() || timestamp_characters != tokens[1].size() ||
+                    parsed_index > std::numeric_limits<uint32_t>::max()) {
+                    continue;
+                }
+                row_buffer.index = static_cast<uint32_t>(parsed_index);
+                row_buffer.raw_timestamp = static_cast<uint64_t>(parsed_timestamp);
 
                 // TIMEMULT 表示每个原始时间单位对应的微秒数；先转纳秒可保留小数微秒。
                 const long double offset_ns = static_cast<long double>(row_buffer.raw_timestamp) *
