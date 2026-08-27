@@ -261,6 +261,10 @@ StreamEngineTest.GeneratesComtradeFilesAndStreamsEverySample
 4. 使用独立消费者项目验证 `find_package(ComtradeCore CONFIG REQUIRED)`。
 5. 上传保留 7 天的安装包构件。
 
+真实 COMTRADE 文件的准确性测试和流式读取基准方法见
+[`tests/README.md`](tests/README.md)。常规 CI 会选择性下载一组 Git LFS 测试文件并运行准确性测试；
+`.github/workflows/benchmark.yml` 每周或手动运行 Release/GCC 基准，并保存性能结果 30 天。
+
 ## 目录结构
 
 ```text
