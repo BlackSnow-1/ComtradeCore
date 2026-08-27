@@ -3,13 +3,14 @@
 [![CI](https://github.com/BlackSnow-1/ComtradeCore/actions/workflows/ci.yml/badge.svg)](https://github.com/BlackSnow-1/ComtradeCore/actions/workflows/ci.yml)
 
 ComtradeCore 是一个轻量、Header-only 的 C++17 COMTRADE 库，用于构造、写入和流式读取电力系统暂态记录。
-核心库只依赖 C++ 标准库。
+核心功能无第三方库依赖；CFG 中文编码转换在 Linux 使用系统 `iconv`，在 Windows 使用系统编码 API。
 
 ## 功能概览
 
 - 使用 `Record` 在内存中构造记录并生成 CFG、DAT 文件。
 - 使用 `StreamWriter` 写入 ASCII、BINARY、BINARY32 和 FLOAT32 DAT 数据。
 - 使用 `StreamReader` 逐采样读取 ASCII DAT，避免一次性加载完整文件。
+- 自动识别 UTF-8 CFG，并将 GB2312、GBK、GB18030 CFG 的中文元数据统一转换为 UTF-8。
 - 生成的 CFG 和 ASCII DAT 在所有平台统一使用 COMTRADE CRLF 行结束符。
 - 支持 IEEE C37.111 的 1991、1999 和 2013 版本标识。
 - 提供可安装的 CMake package，安装后可通过 `find_package()` 使用。
@@ -24,6 +25,7 @@ IEEE/IEC C37.111-2013 CFG 支持采样率段、时间倍率、小数秒精度、
 
 - 支持 C++17 的编译器：GCC、Clang 或 MSVC。
 - CMake 3.14 或更高版本。
+- Linux 需要系统提供 `iconv`（glibc 发行版通常已经内置）。
 - GoogleTest 仅在构建单元测试时需要；核心库本身不依赖 GoogleTest。
 
 ## 安装与集成
