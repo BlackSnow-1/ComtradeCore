@@ -4,21 +4,38 @@
 
 ### 准确性测试
 
-`test_real_files.cpp` 使用真实录波文件：
+`test_real_files.cpp` 参数化覆盖当前测试数据中的全部 6 组 ASCII 录波：
 
 ```text
-ComtradeFiles/SIMENS/20191024045947.CFG
-ComtradeFiles/SIMENS/20191024045947.DAT
+ComtradeFiles/cometrade/000002.CFG + 000002.DAT                  (GB2312)
+ComtradeFiles/cometrade/000003.CFG + 000003.DAT                  (GB2312)
+ComtradeFiles/cometrade/000004.CFG + 000004.DAT                  (GB2312)
+ComtradeFiles/SIMENS/20191024045947.CFG + 20191024045947.DAT      (GB2312)
+ComtradeFiles/Transient/*_ID_1_*_TRIP.cfg + 对应 DAT              (UTF-8)
+ComtradeFiles/Transient/*_ID_2_*_TRIP.cfg + 对应 DAT              (UTF-8)
 ```
 
-该基线包含 12 路模拟量、29 路数字量和 1740 个 ASCII 采样点。测试验证：
+`FaultData` 和 `testfile` 中当前没有声明为 ASCII 的 CFG，因此不会交给仅支持 ASCII 的
+`StreamReader`。参数化测试验证：
 
-- CFG 通道数量、数据类型、频率和采样率；
+- CFG 能否加载，数据类型是否为 ASCII；
+- GB2312 和 UTF-8 CFG 是否都能完成结构及数值解析；
+- 通道声明与每一行的数据维度是否一致；
 - 所有采样序号是否连续；
-- 时间戳是否单调，以及设备产生的 1 微秒舍入特征；
+- 原始时间戳是否单调，以及按 `TIMEMULT` 换算后的微秒、纳秒偏移和绝对时间是否一致；
+- 实际读取行数是否等于 CFG 声明的结束采样号。
+
+其中 Siemens 基线另外包含 12 路模拟量、29 路数字量和 1740 个采样点的精确断言，继续验证：
+
+- 频率和采样率；
+- 设备产生的 1 微秒舍入特征；
 - 所有模拟通道的累计换算结果；
 - 所有数字通道的置位次数；
 - 首尾采样的时间戳和代表性通道值。
+
+CFG 的结构字段、数字和分隔符都是 ASCII 子集，解析器按原始字节读取，所以 UTF-8 和 GB2312
+都能完成数值解析。当前不会把 GB2312 中文元数据自动转成 UTF-8：若调用方需要跨平台显示站名、
+设备名或通道名，应在输入边界将 GB2312/GB18030 转为 UTF-8，或明确按 GB2312 解码这些字符串。
 
 固定基线值应由独立工具或人工计算产生，不要直接调用待测解析器生成期望值，否则同一个错误可能同时存在于结果和基线中。
 
@@ -26,7 +43,7 @@ ComtradeFiles/SIMENS/20191024045947.DAT
 
 ```bash
 git lfs pull \
-  --include="tests/ComtradeFiles/SIMENS/20191024045947.CFG,tests/ComtradeFiles/SIMENS/20191024045947.DAT"
+  --include="tests/ComtradeFiles/cometrade/*.CFG,tests/ComtradeFiles/cometrade/*.DAT,tests/ComtradeFiles/SIMENS/20191024045947.CFG,tests/ComtradeFiles/SIMENS/20191024045947.DAT,tests/ComtradeFiles/Transient/*.cfg,tests/ComtradeFiles/Transient/*.dat"
 ```
 
 运行准确性测试：
