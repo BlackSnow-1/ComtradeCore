@@ -253,18 +253,18 @@ StreamEngineTest.GeneratesComtradeFilesAndStreamsEverySample
 ### 流式读取基准测试结果
 
 以下结果使用 `tests/ComtradeFiles/SIMENS/20191024045947.CFG` 和同名 DAT 文件，
-在 Release 模式下连续读取 100 次得到。Linux 发行版和内存信息在本次测试中未记录，后续复测时应使用
-`cat /etc/os-release` 和 `free -h` 补充，以便不同平台之间进行有效比较。
+在 Ubuntu 26.04 LTS、Release 模式下连续读取 100 次得到。
 
 测试环境：
 
 | 项目 | 测试平台信息 |
 | --- | --- |
-| 操作系统 | Linux（发行版及版本未记录） |
+| 操作系统 | Ubuntu 26.04 LTS (Resolute Raccoon) |
 | CPU 型号 | 12th Gen Intel(R) Core(TM) i5-12400 |
 | CPU 架构 | x86_64 |
 | CPU 核心 / 线程 | 6 核 / 12 线程 |
-| 内存 | 未记录 |
+| 内存 | 7.0 GiB（测试时可用 5.7 GiB） |
+| 交换空间 | 4.0 GiB |
 | 构建类型 | Release |
 
 测试结果：
