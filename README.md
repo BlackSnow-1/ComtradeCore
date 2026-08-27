@@ -250,6 +250,48 @@ ctest --test-dir build -C Debug --output-on-failure
 StreamEngineTest.GeneratesComtradeFilesAndStreamsEverySample
 ```
 
+### 流式读取基准测试结果
+
+以下结果使用 `tests/ComtradeFiles/SIMENS/20191024045947.CFG` 和同名 DAT 文件，
+在 Release 模式下连续读取 100 次得到。Linux 发行版和内存信息在本次测试中未记录，后续复测时应使用
+`cat /etc/os-release` 和 `free -h` 补充，以便不同平台之间进行有效比较。
+
+测试环境：
+
+| 项目 | 测试平台信息 |
+| --- | --- |
+| 操作系统 | Linux（发行版及版本未记录） |
+| CPU 架构 | x86_64 |
+| CPU 运行模式 | 32-bit、64-bit |
+| 地址宽度 | 39 bits physical、48 bits virtual |
+| 字节序 | Little Endian |
+| CPU 型号 | 12th Gen Intel(R) Core(TM) i5-12400 |
+| 逻辑 CPU 数 | 12（在线 CPU：0-11） |
+| 物理拓扑 | 1 路、每路 6 核、每核 2 线程 |
+| 厂商 ID | GenuineIntel |
+| CPU 系列 / 型号 / 步进 | 6 / 151 / 5 |
+| CPU 频率范围 | 800.0000 MHz～5600.0000 MHz（测试时 scaling MHz：32%） |
+| BogoMIPS | 4992.00 |
+| 内存 | 未记录 |
+
+测试结果：
+
+| 指标 | 结果 |
+| --- | ---: |
+| 循环次数 | 100 |
+| 每轮采样数 | 1740 |
+| 总处理采样数 | 174000 |
+| 总耗时 | 0.326 s |
+| 数据吞吐量 | 99.546 MiB/s |
+| 采样处理速度 | 533806.786 samples/s |
+| 单采样平均耗时 | 1873.337 ns（约 1.873 us） |
+| 校验和 | 189267714606.961 |
+
+本次结果表明，在上述 Linux x86_64 环境中，流式读取器平均每轮读取 1740 个采样点约需
+3.26 ms，处理能力约为 53.38 万采样点每秒。`checksum` 用于防止读取结果被编译器无效优化，
+并检查多轮读取结果是否稳定，不代表 COMTRADE 数据本身的业务含义。性能数据会受到 CPU 动态调频、
+系统负载、编译器版本和存储介质影响，因此应在相同环境和 Release 构建下比较不同版本。
+
 ### GitHub Actions 自动测试
 
 `.github/workflows/ci.yml` 会在推送到 `main`、创建或更新 Pull Request，以及手动触发时运行。
