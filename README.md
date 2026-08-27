@@ -1,9 +1,17 @@
 # ComtradeCore
 
 [![CI](https://github.com/BlackSnow-1/ComtradeCore/actions/workflows/ci.yml/badge.svg)](https://github.com/BlackSnow-1/ComtradeCore/actions/workflows/ci.yml)
+[![C++17](https://img.shields.io/badge/C%2B%2B-17-00599C?logo=cplusplus&logoColor=white)](#环境要求)
+[![CMake 3.14+](https://img.shields.io/badge/CMake-3.14%2B-064F8C?logo=cmake&logoColor=white)](#安装与集成)
+[![MIT License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+[![Header-only](https://img.shields.io/badge/Architecture-Header--only-2ea44f)](#安装与集成)
+[![COMTRADE](https://img.shields.io/badge/COMTRADE-1991%20%7C%201999%20%7C%202013-6f42c1)](#功能概览)
+[![Platforms](https://img.shields.io/badge/Platforms-Linux%20%7C%20Windows%20%7C%20macOS-informational)](.github/workflows/ci.yml)
+[![Java JNI](https://img.shields.io/badge/Java-JNI%20binding-ED8B00?logo=openjdk&logoColor=white)](#java-绑定)
 
 ComtradeCore 是一个轻量、Header-only 的 C++17 COMTRADE 库，用于构造、写入和流式读取电力系统暂态记录。
-核心功能无第三方库依赖；CFG 中文编码转换在 Linux 使用系统 `iconv`，在 Windows 使用系统编码 API。
+核心功能无第三方库依赖；CFG 中文编码转换在 Linux/macOS 使用系统 `iconv`，在 Windows 使用系统编码 API。
 
 ## 功能概览
 
@@ -26,7 +34,7 @@ IEEE/IEC C37.111-2013 CFG 支持采样率段、时间倍率、小数秒精度、
 
 - 支持 C++17 的编译器：GCC、Clang 或 MSVC。
 - CMake 3.14 或更高版本。
-- Linux 需要系统提供 `iconv`（glibc 发行版通常已经内置）。
+- Linux 和 macOS 需要系统提供 `iconv`（glibc 发行版和 macOS 通常已经内置）。
 - GoogleTest 仅在构建单元测试时需要；核心库本身不依赖 GoogleTest。
 - Java 绑定为可选组件；构建时还需要 SWIG 4.0 或更高版本、JDK（包含 JNI 头文件）和 Java 编译器。
 
@@ -390,7 +398,7 @@ StreamEngineTest.GeneratesComtradeFilesAndStreamsEverySample
 ### GitHub Actions 自动测试
 
 `.github/workflows/ci.yml` 会在推送到 `main`、创建或更新 Pull Request，以及手动触发时运行。
-自动化流程覆盖 Linux GCC、Linux Clang 和 Windows MSVC，并执行：
+自动化流程覆盖 Linux GCC、Linux Clang、macOS Apple Clang 和 Windows MSVC，并执行：
 
 1. 配置和编译库、示例及 GoogleTest 测试。
 2. 通过 CTest 运行全部单元测试。
