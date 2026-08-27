@@ -43,6 +43,13 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Fetch accuracy-test fixture
+        shell: bash
+        run: >-
+          git lfs pull
+          --include="tests/ComtradeFiles/SIMENS/20191024045947.CFG,tests/ComtradeFiles/SIMENS/20191024045947.DAT"
+          --exclude=""
+
       - name: Configure
         run: >-
           cmake -S . -B build
