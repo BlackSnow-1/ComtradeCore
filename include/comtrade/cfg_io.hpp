@@ -181,7 +181,9 @@ inline bool parseCfgLines(const std::vector<std::string>& lines, CfgData& cfg) {
         parsed_cfg.local_code = time_codes[1];
         parsed_cfg.time_quality_code = time_quality[0];
         parsed_cfg.leap_second = std::stoi(time_quality[1]);
-        if (parsed_cfg.leap_second < -1 || parsed_cfg.leap_second > 1) return false;
+        // IEEE/IEC C37.111-2013 defines four leap-second indicators:
+        // 0=no adjustment, 1=added, 2=subtracted, 3=source cannot handle it.
+        if (parsed_cfg.leap_second < 0 || parsed_cfg.leap_second > 3) return false;
     }
 
     cfg = std::move(parsed_cfg);
