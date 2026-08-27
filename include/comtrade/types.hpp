@@ -129,6 +129,8 @@ namespace comtrade {
 
         // DAT 第二列为原始时间标记；实际微秒偏移 = 原始值 * time_multiplier。
         std::vector<SampleRate> sample_rates;
+        // 2013 版允许 nrates=0 后继续列出不定数量的采样段；该标志用于保持原始语义并正确回写。
+        bool variable_sample_rate = false;
         double time_multiplier = 1.0;
 
         // IEEE/IEC C37.111-2013 time metadata. These two CFG lines are emitted
