@@ -1,3 +1,7 @@
+/**
+ * @file stream_reader.hpp
+ * @brief 以恒定内存逐行解析 ASCII DAT，并结合 CFG 输出工程量和绝对时间。
+ */
 #pragma once
 
 #include "cfg_io.hpp"
@@ -17,6 +21,7 @@
 
 namespace comtrade {
 
+// 回调看到的单个采样点。raw_timestamp 保留 DAT 原值，其余时间字段为换算结果。
 struct SampleRow {
     uint32_t index = 0;
     uint32_t raw_timestamp = 0;
@@ -27,6 +32,7 @@ struct SampleRow {
     std::vector<bool> digital_values;
 };
 
+// StreamReader 在构造时固定一份 CFG 快照，之后可用它重复流式处理同格式 DAT。
 class StreamReader {
 public:
     explicit StreamReader(const std::string& cfg_filepath) {
@@ -46,6 +52,7 @@ public:
         std::ifstream dat_file(dat_filepath);
         if (!dat_file.is_open()) return 0;
 
+        // 整个文件复用同一个行缓冲，回调不得在返回后继续持有 row 或内部容器的引用。
         SampleRow row_buffer;
         row_buffer.analog_values.resize(static_cast<std::size_t>(cfg_.analog_count));
         row_buffer.digital_values.resize(static_cast<std::size_t>(cfg_.digital_count));
@@ -61,6 +68,7 @@ public:
                 row_buffer.index = static_cast<uint32_t>(std::stoul(tokens[0]));
                 row_buffer.raw_timestamp = static_cast<uint32_t>(std::stoul(tokens[1]));
 
+                // TIMEMULT 表示每个原始时间单位对应的微秒数；先转纳秒可保留小数微秒。
                 const long double offset_ns = static_cast<long double>(row_buffer.raw_timestamp) *
                                               static_cast<long double>(cfg_.time_multiplier) * 1000.0L;
                 if (offset_ns > static_cast<long double>(std::numeric_limits<int64_t>::max())) continue;
@@ -80,6 +88,7 @@ public:
                     row_buffer.digital_values[static_cast<std::size_t>(i)] = std::stoul(tokens[token_index]) != 0;
                 }
             } catch (const std::exception&) {
+                // 单行损坏不终止整份录波；只有成功解析的行才触发回调并计数。
                 continue;
             }
 
