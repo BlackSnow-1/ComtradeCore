@@ -1,6 +1,5 @@
-//
-// Created by Administrator on 2026/8/3.
-//
+// 示例目标：绕过逐点接口的容器检查，按通道列批量构造一秒三相波形并写出 ASCII COMTRADE。
+// 这种方式适合已知最终样本数的离线生成场景。
 #include "comtrade/record.hpp" // 请根据实际包含路径调整
 #include <iostream>
 #include <vector>
@@ -55,6 +54,7 @@ int main() {
     uint32_t step_us = 250;
     double frequency = 50.0; // 50Hz 工频
 
+    // getMutableData 暴露内部列式存储；使用者需要自行保证每列长度与 timestamp 一致。
     auto& data = record.getMutableData();
 
     // 2.1 预分配内存，避免 vector 频繁扩容
@@ -105,7 +105,7 @@ int main() {
     // 强制指定为 ASCII 格式（如果你的类里有这个枚举或配置）
     record.getMutableCfg().data_type = comtrade::DataType::ASCII;
 
-    // 保存文件
+    // saveCfg/saveDat 分开返回状态，实际应用可据此定位配置或数据文件的写入失败。
     std::string cfg_filename = "test_record.cfg";
     std::string dat_filename = "test_record.dat";
 
