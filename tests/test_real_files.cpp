@@ -10,6 +10,7 @@
 
 #include "comtrade/stream_reader.hpp"
 
+// 真实文件测试负责设备兼容性；固定的小型合成边界用例放在 test_stream.cpp。
 namespace {
 
 namespace fs = std::filesystem;
@@ -23,6 +24,7 @@ struct AsciiFixture {
     std::size_t expected_rows;
 };
 
+// 清单只包含 CFG 声明为 ASCII 且具有同名 DAT 的记录，名称同时标识源文本编码。
 constexpr std::array<AsciiFixture, 6> kAsciiFixtures = {{
     {"Gb2312Cometrade000002", "cometrade/000002.CFG", "cometrade/000002.DAT", 4381},
     {"Gb2312Cometrade000003", "cometrade/000003.CFG", "cometrade/000003.DAT", 4381},
@@ -48,7 +50,7 @@ bool isGitLfsPointer(const fs::path& path) {
 
     std::ifstream input(path, std::ios::binary);
 
-    // 用于判断文件是不是 Git LFS 指针文件，而不是真正的 COMTRADE 文件
+    // 未执行 git lfs pull 时仓库里只有指针文本，此时跳过而不是报告解析器错误。
     std::string first_line;
     std::getline(input, first_line);
     return first_line.rfind("version https://git-lfs.github.com/spec/v1", 0) == 0;
@@ -68,6 +70,7 @@ TEST_P(ComtradeAsciiFileTest, StreamsEverySampleWithConsistentTimeAndChannelShap
         GTEST_SKIP() << "COMTRADE fixture is a Git LFS pointer; run git lfs pull first: " << cfg_path;
     }
 
+    // 通用层验证每份录波的结构、编码、时间换算和完整行数，不绑定具体波形值。
     const comtrade::StreamReader reader(cfg_path.string());
     const auto& cfg = reader.getCfg();
     ASSERT_EQ(cfg.data_type, comtrade::DataType::ASCII);
@@ -99,6 +102,7 @@ TEST_P(ComtradeAsciiFileTest, StreamsEverySampleWithConsistentTimeAndChannelShap
         if (callback_count > 0) EXPECT_GE(row.raw_timestamp, previous_raw_timestamp);
         previous_raw_timestamp = row.raw_timestamp;
 
+        // 独立重算时间公式，确保 raw、TIMEMULT、纳秒偏移和绝对时间相互一致。
         const auto expected_offset_ns = static_cast<std::int64_t>(std::llround(
             static_cast<long double>(row.raw_timestamp) *
             static_cast<long double>(cfg.time_multiplier) * 1000.0L));
@@ -121,6 +125,7 @@ INSTANTIATE_TEST_SUITE_P(
     [](const ::testing::TestParamInfo<AsciiFixture>& info) { return info.param.test_name; });
 
 TEST(ComtradeRealFileAccuracy, SiemensAsciiRecordingMatchesReferenceValues) {
+    // Siemens 文件额外使用预先计算的黄金基线，检查数值正确性而不只是“能够读取”。
     const auto cfg_path = fixturePath(".CFG");
     const auto dat_path = fixturePath(".DAT");
     ASSERT_TRUE(fs::exists(cfg_path)) << cfg_path;
@@ -185,6 +190,7 @@ TEST(ComtradeRealFileAccuracy, SiemensAsciiRecordingMatchesReferenceValues) {
     EXPECT_EQ(intervals_1249, 23U);
     EXPECT_EQ(intervals_1251, 23U);
 
+    // 累计值和置位次数由库外独立计算，避免用被测实现生成自身期望结果。
     constexpr std::array<double, 12> expected_sums = {
         0.06961520664005338, -0.08432408385002621, 2.5546920344200474,
         -2.5391913844602243, -114.75848753280292, -14.324892020402622,
