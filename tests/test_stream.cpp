@@ -462,7 +462,8 @@ namespace {
         cfg.time_code = "UTC";
         cfg.local_code = "+0800";
         cfg.time_quality_code = "4";
-        cfg.leap_second = 1;
+        // 3 表示时间源不具备处理闰秒的能力，是 2013 标准定义的合法值。
+        cfg.leap_second = 3;
         cfg.timestamp_fractional_digits = 9;
 
         ASSERT_TRUE(generated_record.saveCfg(cfg_path_.string()));
@@ -472,7 +473,7 @@ namespace {
         EXPECT_NE(cfg_text.find("GRID_2013,RELAY_2013,2013\r\n"), std::string::npos);
         EXPECT_NE(cfg_text.find("19/08/2026,12:34:56.123456789\r\n"), std::string::npos);
         EXPECT_NE(cfg_text.find("4000,2\r\n"), std::string::npos);
-        EXPECT_NE(cfg_text.find("ASCII\r\n0.001\r\nUTC,+0800\r\n4,1\r\n"), std::string::npos);
+        EXPECT_NE(cfg_text.find("ASCII\r\n0.001\r\nUTC,+0800\r\n4,3\r\n"), std::string::npos);
 
         comtrade::StreamReader reader(cfg_path_.string());
         const auto &parsed_cfg = reader.getCfg();
@@ -484,7 +485,7 @@ namespace {
         EXPECT_EQ(parsed_cfg.time_code, "UTC");
         EXPECT_EQ(parsed_cfg.local_code, "+0800");
         EXPECT_EQ(parsed_cfg.time_quality_code, "4");
-        EXPECT_EQ(parsed_cfg.leap_second, 1);
+        EXPECT_EQ(parsed_cfg.leap_second, 3);
         EXPECT_EQ(parsed_cfg.timestamp_fractional_digits, 9);
 
         std::vector<comtrade::SampleRow> rows;
@@ -494,5 +495,41 @@ namespace {
         EXPECT_EQ(rows[1].timestamp_us, 250U);
         EXPECT_EQ(rows[1].time_offset, std::chrono::microseconds(250));
         EXPECT_EQ(rows[1].absolute_time, parsed_cfg.start_time + std::chrono::microseconds(250));
+    }
+
+    TEST_F(StreamEngineTest, AsciiStreamPreservesRawTimestampBeyondUint32) {
+        // ASCII 时间标记是文本整数；真实长录波可能超过二进制 DAT 的 32 位字段范围。
+        {
+            std::ofstream cfg_file(cfg_path_, std::ios::binary);
+            ASSERT_TRUE(cfg_file.is_open());
+            cfg_file << "LONG_RECORD,ASCII_RELAY,1999\r\n"
+                     << "0,0A,0D\r\n"
+                     << "50\r\n"
+                     << "1\r\n"
+                     << "1,2\r\n"
+                     << "01/07/2020,11:54:47.000000\r\n"
+                     << "01/07/2020,13:06:22.000000\r\n"
+                     << "ASCII\r\n"
+                     << "1\r\n";
+        }
+        {
+            std::ofstream dat_file(dat_path_, std::ios::binary);
+            ASSERT_TRUE(dat_file.is_open());
+            dat_file << "1,4294967295\r\n"
+                     << "2,4294967296\r\n"
+                     << '\x1A';
+        }
+
+        const comtrade::StreamReader reader(cfg_path_.string());
+        std::vector<comtrade::SampleRow> rows;
+        ASSERT_EQ(reader.processDatStream(
+                      dat_path_.string(), [&](const auto& row) { rows.push_back(row); }),
+                  2U);
+        ASSERT_EQ(rows.size(), 2U);
+        EXPECT_EQ(rows[0].raw_timestamp, 4294967295ULL);
+        EXPECT_EQ(rows[1].raw_timestamp, 4294967296ULL);
+        EXPECT_EQ(rows[1].timestamp_us, 4294967296ULL);
+        EXPECT_GT(rows[1].raw_timestamp, rows[0].raw_timestamp);
+        EXPECT_EQ(rows[1].time_offset, std::chrono::microseconds(4294967296LL));
     }
 } // namespace
