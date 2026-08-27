@@ -124,7 +124,8 @@ namespace comtrade {
                 sample_rates.push_back({sample_rate, static_cast<uint32_t>(data_.timestamp.size())});
             }
 
-            out << sample_rates.size() << "\r\n";
+            // variable_sample_rate 保留 nrates=0 的语义；采样段本身仍全部写在后续各行。
+            out << (cfg_.variable_sample_rate ? 0U : sample_rates.size()) << "\r\n";
             for (const auto& sample_rate : sample_rates) {
                 out << sample_rate.samples_per_second << "," << sample_rate.end_sample << "\r\n";
             }
