@@ -16,7 +16,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(__APPLE__)
 #include <iconv.h>
 #endif
 
@@ -93,8 +93,8 @@ inline bool gb18030ToUtf8(const std::string& input, std::string& output) {
     output.resize(static_cast<std::size_t>(utf8_size));
     return WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide.data(), wide_size,
                                output.data(), utf8_size, nullptr, nullptr) == utf8_size;
-#elif defined(__linux__)
-    // glibc 通常直接提供 iconv；输出缓冲不足时按需扩容，不截断多字节字符。
+#elif defined(__linux__) || defined(__APPLE__)
+    // Linux 和 macOS 都通过 iconv 转码；输出缓冲不足时按需扩容，不截断多字节字符。
     iconv_t converter = iconv_open("UTF-8", "GB18030");
     if (converter == reinterpret_cast<iconv_t>(-1)) return false;
 
