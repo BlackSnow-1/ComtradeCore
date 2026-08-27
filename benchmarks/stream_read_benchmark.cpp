@@ -8,6 +8,7 @@
 
 #include "comtrade/stream_reader.hpp"
 
+// 该程序是轻量级微基准，不依赖 Google Benchmark。应使用 Release 构建比较版本趋势。
 namespace {
 
 namespace fs = std::filesystem;
@@ -21,6 +22,7 @@ struct RunResult {
 RunResult readOnce(const comtrade::StreamReader& reader, const fs::path& dat_path) {
     RunResult result;
     result.rows = reader.processDatStream(dat_path.string(), [&](const comtrade::SampleRow& row) {
+        // 消费少量解析结果，防止优化器把读取循环视为无可观察副作用而删除。
         result.checksum += static_cast<double>(row.index) + static_cast<double>(row.raw_timestamp);
         if (!row.analog_values.empty()) result.checksum += row.analog_values.front();
         if (!row.digital_values.empty()) result.checksum += row.digital_values.front() ? 1.0 : 0.0;
@@ -47,6 +49,7 @@ int main(int argc, char** argv) {
         if (iterations == 0) throw std::invalid_argument("iterations must be greater than zero");
 
         const comtrade::StreamReader reader(cfg_path.string());
+        // 预热让 CFG、DAT 和解析路径进入操作系统缓存；预热耗时不计入正式结果。
         const auto warmup = readOnce(reader, dat_path);
         if (warmup.rows == 0) throw std::runtime_error("no samples were parsed");
 
@@ -61,6 +64,7 @@ int main(int argc, char** argv) {
         }
         const auto elapsed = Clock::now() - start;
         const double seconds = std::chrono::duration<double>(elapsed).count();
+        // 吞吐量按 DAT 逻辑读取字节数计算，不包含 CFG，也不等同于物理磁盘带宽。
         const double total_bytes = static_cast<double>(fs::file_size(dat_path)) * iterations;
         const double mib_per_second = total_bytes / (1024.0 * 1024.0) / seconds;
         const double samples_per_second = static_cast<double>(total_rows) / seconds;
