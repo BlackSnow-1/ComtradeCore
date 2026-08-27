@@ -28,6 +28,7 @@ IEEE/IEC C37.111-2013 CFG 支持采样率段、时间倍率、小数秒精度、
 - CMake 3.14 或更高版本。
 - Linux 需要系统提供 `iconv`（glibc 发行版通常已经内置）。
 - GoogleTest 仅在构建单元测试时需要；核心库本身不依赖 GoogleTest。
+- Java 绑定为可选组件；构建时还需要 SWIG 4.0 或更高版本、JDK（包含 JNI 头文件）和 Java 编译器。
 
 ## 安装与集成
 
@@ -117,6 +118,102 @@ cmake -S . -B build \
 target_compile_features(your_app PRIVATE cxx_std_17)
 target_include_directories(your_app PRIVATE /path/to/ComtradeCore/include)
 ```
+
+## Java 绑定
+
+Java 绑定提供 `comtrade.ComtradeRecord`，用于读写内存中的 ASCII COMTRADE 记录。它由一个 JAR 和
+一个 JNI 动态库组成：Java 项目在编译期引入 JAR，运行时还必须能够找到当前平台对应的动态库。
+它不是一个不依赖本地代码的纯 Java JAR。
+
+### 构建和安装
+
+安装 SWIG 和 JDK 后启用 `BUILD_JAVA_BINDINGS`：
+
+```bash
+cmake -S . -B build-java \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_JAVA_BINDINGS=ON \
+  -DCOMTRADE_BUILD_TESTS=OFF \
+  -DCOMTRADE_BUILD_EXAMPLES=OFF \
+  -DCMAKE_INSTALL_PREFIX=/path/to/comtrade-install
+
+cmake --build build-java --config Release
+cmake --install build-java --config Release
+```
+
+在 CLion 的 CMake 配置中，把 `-DBUILD_JAVA_BINDINGS=ON` 添加到 **CMake 选项** 后重新加载项目。
+远程 Linux 工具链必须在远程主机上安装 SWIG 和 JDK；CMake 使用的 JDK 应与最终运行 Java 程序的
+CPU 架构一致。
+
+安装后会得到：
+
+```text
+<prefix>/lib/comtrade/java/
+├── comtrade-core-java.jar
+└── libComtradeCoreJava.so       # Linux
+```
+
+Windows 对应的本地库名为 `ComtradeCoreJava.dll`，macOS 对应
+`libComtradeCoreJava.dylib`。
+
+### 在 Java 中直接引入
+
+下面的程序创建一份 2013 版 ASCII COMTRADE 记录：
+
+```java
+import comtrade.ComtradeRecord;
+
+public final class Example {
+    public static void main(String[] args) {
+        try (ComtradeRecord record = new ComtradeRecord()) {
+            record.setStationAndDevice(
+                    "GRID_01",
+                    "RELAY_01",
+                    ComtradeRecord.StandardVersion.V2013);
+            record.setTimestamps(
+                    "24/10/2019,04:59:47.000000000",
+                    "24/10/2019,04:59:47.001000000");
+            record.setTimestampFractionalDigits(9);
+            record.set2013TimeMetadata("UTC", "+0", "F", 0);
+
+            // COMTRADE 通道编号从 1 开始。
+            record.addAnalogChannel(1, "VA", "A", "V", 0.1, -5.0);
+            record.addDigitalChannel(1, "TRIP", "", false);
+
+            record.addSample(0, new double[]{220.0}, new boolean[]{false});
+            record.addSample(250, new double[]{221.2}, new boolean[]{true});
+            record.save("record.cfg", "record.dat");
+        }
+    }
+}
+```
+
+直接使用 `javac` 和 `java`：
+
+```bash
+javac -cp /path/to/comtrade-install/lib/comtrade/java/comtrade-core-java.jar Example.java
+java \
+  -Djava.library.path=/path/to/comtrade-install/lib/comtrade/java \
+  -cp /path/to/comtrade-install/lib/comtrade/java/comtrade-core-java.jar:. \
+  Example
+```
+
+Windows 的 classpath 分隔符应由 `:` 改为 `;`。Gradle 项目可直接加入本地 JAR：
+
+```groovy
+dependencies {
+    implementation files('/path/to/comtrade-install/lib/comtrade/java/comtrade-core-java.jar')
+}
+
+tasks.withType(JavaExec).configureEach {
+    systemProperty 'java.library.path', '/path/to/comtrade-install/lib/comtrade/java'
+}
+```
+
+读取已有文件时调用 `record.load(cfgPath, datPath)`，再通过 `getSampleCount()`、
+`getTimestampMicroseconds()`、`getAnalogValue()` 和 `getDigitalValue()` 访问数据。读取值时的通道下标和
+采样下标均从 0 开始。当前 Java 门面对应 `Record`，会把完整 ASCII DAT 载入内存；需要恒定内存的
+Java 流式回调接口尚未包含在此绑定中。
 
 ## 生成 COMTRADE 文件
 
