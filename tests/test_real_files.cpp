@@ -71,8 +71,21 @@ TEST_P(ComtradeAsciiFileTest, StreamsEverySampleWithConsistentTimeAndChannelShap
     const comtrade::StreamReader reader(cfg_path.string());
     const auto& cfg = reader.getCfg();
     ASSERT_EQ(cfg.data_type, comtrade::DataType::ASCII);
+    EXPECT_TRUE(comtrade::detail::isValidUtf8(cfg.station_name));
+    EXPECT_TRUE(comtrade::detail::isValidUtf8(cfg.rec_dev_id));
     ASSERT_EQ(cfg.analog_channels.size(), static_cast<std::size_t>(cfg.analog_count));
     ASSERT_EQ(cfg.digital_channels.size(), static_cast<std::size_t>(cfg.digital_count));
+    for (const auto& channel : cfg.analog_channels) {
+        EXPECT_TRUE(comtrade::detail::isValidUtf8(channel.id));
+        EXPECT_TRUE(comtrade::detail::isValidUtf8(channel.phase));
+        EXPECT_TRUE(comtrade::detail::isValidUtf8(channel.ccbm));
+        EXPECT_TRUE(comtrade::detail::isValidUtf8(channel.uu));
+    }
+    for (const auto& channel : cfg.digital_channels) {
+        EXPECT_TRUE(comtrade::detail::isValidUtf8(channel.id));
+        EXPECT_TRUE(comtrade::detail::isValidUtf8(channel.phase));
+        EXPECT_TRUE(comtrade::detail::isValidUtf8(channel.ccbm));
+    }
     ASSERT_FALSE(cfg.sample_rates.empty());
     EXPECT_EQ(cfg.sample_rates.back().end_sample, fixture.expected_rows);
 
