@@ -354,6 +354,47 @@ namespace {
         EXPECT_TRUE(rows[2].digital_values[1]);
     }
 
+    TEST_F(StreamEngineTest, Comtrade1991CfgOmitsTimeMultiplierAndUsesMicrosecondTimestamps) {
+        // 1991 标准没有 TIMEMULT，DAT 第二列应直接表示相对开始时刻的微秒偏移。
+        comtrade::Record generated_record;
+        generated_record.setStationAndDevice(
+            "GRID_1991", "RELAY_1991", comtrade::StandardVersion::V1991);
+        generated_record.setTimestamps(
+            "01/07/2020,11:54:47.705000",
+            "01/07/2020,11:54:47.705250");
+        generated_record.addSample(0, {}, {});
+        generated_record.addSample(250, {}, {});
+
+        ASSERT_TRUE(generated_record.saveCfg(cfg_path_.string()));
+        ASSERT_TRUE(generated_record.saveDat(dat_path_.string()));
+
+        const auto cfg_text = readTextFile(cfg_path_);
+        constexpr auto expected_tail = "ASCII\r\n";
+        ASSERT_GE(cfg_text.size(), std::char_traits<char>::length(expected_tail));
+        EXPECT_EQ(cfg_text.substr(cfg_text.size() - std::char_traits<char>::length(expected_tail)),
+                  expected_tail);
+
+        const comtrade::StreamReader reader(cfg_path_.string());
+        const auto& cfg = reader.getCfg();
+        EXPECT_EQ(cfg.version, comtrade::StandardVersion::V1991);
+        EXPECT_DOUBLE_EQ(cfg.time_multiplier, 1.0);
+        ASSERT_EQ(cfg.sample_rates.size(), 1U);
+        EXPECT_DOUBLE_EQ(cfg.sample_rates[0].samples_per_second, 4000.0);
+        EXPECT_EQ(cfg.sample_rates[0].end_sample, 2U);
+
+        std::vector<comtrade::SampleRow> rows;
+        ASSERT_EQ(reader.processDatStream(
+                      dat_path_.string(), [&](const auto& row) { rows.push_back(row); }),
+                  2U);
+        ASSERT_EQ(rows.size(), 2U);
+        EXPECT_EQ(rows[0].raw_timestamp, 0U);
+        EXPECT_EQ(rows[0].timestamp_us, 0U);
+        EXPECT_EQ(rows[1].raw_timestamp, 250U);
+        EXPECT_EQ(rows[1].timestamp_us, 250U);
+        EXPECT_EQ(rows[1].time_offset, std::chrono::microseconds(250));
+        EXPECT_EQ(rows[1].absolute_time, cfg.start_time + std::chrono::microseconds(250));
+    }
+
     TEST_F(StreamEngineTest, Comtrade2013CfgPreservesPreciseTimeMetadata) {
         // 覆盖 2013 专有尾部字段、9 位小数秒以及小于 1 微秒的 TIMEMULT。
         comtrade::Record generated_record;
