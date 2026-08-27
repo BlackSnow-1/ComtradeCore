@@ -92,7 +92,7 @@ namespace comtrade {
             }
             if (cfg_.version == StandardVersion::V2013 &&
                 (cfg_.time_code.empty() || cfg_.local_code.empty() || cfg_.time_quality_code.empty() ||
-                 cfg_.leap_second < -1 || cfg_.leap_second > 1)) {
+                 cfg_.leap_second < 0 || cfg_.leap_second > 3)) {
                 return false;
             }
 
