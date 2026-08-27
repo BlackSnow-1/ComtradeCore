@@ -1,6 +1,7 @@
 #include <comtrade/comtrade.hpp>
 #include <chrono>
 
+// 最小生命周期示例：创建记录、设置绝对开始/触发时刻，再输出同名 CFG/DAT 文件。
 int main() {
     comtrade::Record record;
     record.setStationAndDevice("Substation_Main", "Diff_Protection");
@@ -18,6 +19,7 @@ int main() {
     // 文件中将自动生成类似:
     // 03/08/2026,21:14:46.000000000
     // 03/08/2026,21:14:46.150500000
+    // 本例没有添加通道和采样点，因此 DAT 为空，主要演示 CFG 时间字段的生成。
     record.saveCfg("chrono_record.cfg");
     record.saveDat("chrono_record.dat");
 
