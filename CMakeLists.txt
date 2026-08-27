@@ -35,6 +35,7 @@ target_compile_features(ComtradeCore INTERFACE cxx_std_17)
 # ==========================================
 option(COMTRADE_BUILD_TESTS "Build ComtradeCore unit tests" ${COMTRADE_IS_TOP_LEVEL})
 option(COMTRADE_BUILD_EXAMPLES "Build ComtradeCore examples" ${COMTRADE_IS_TOP_LEVEL})
+option(COMTRADE_BUILD_BENCHMARKS "Build ComtradeCore benchmarks" OFF)
 # --- 新增的多语言绑定选项 ---
 option(BUILD_JAVA_BINDINGS "Build Java bindings using SWIG" OFF)
 
@@ -66,6 +67,11 @@ endif()
 if(COMTRADE_BUILD_EXAMPLES)
     message(STATUS "ComtradeCore: Building examples enabled")
     add_subdirectory(examples)
+endif()
+
+if(COMTRADE_BUILD_BENCHMARKS)
+    message(STATUS "ComtradeCore: Building benchmarks enabled")
+    add_subdirectory(benchmarks)
 endif()
 
 # --- 条件引入绑定子模块 ---
