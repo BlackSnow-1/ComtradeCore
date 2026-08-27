@@ -218,6 +218,67 @@ tasks.withType(JavaExec).configureEach {
 }
 ```
 
+### 发布到 Maven 仓库
+
+CMake 生成的 JAR 不是由 Maven 项目构建的，因此可以使用 Maven Install Plugin 将它发布到当前用户的
+本地仓库（默认是 `~/.m2/repository`）：
+
+```bash
+mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
+  -Dfile=/path/to/comtrade-install/lib/comtrade/java/comtrade-core-java.jar \
+  -DgroupId=io.github.blacksnow1 \
+  -DartifactId=comtrade-core-java \
+  -Dversion=0.1.0 \
+  -Dpackaging=jar \
+  -DgeneratePom=true
+```
+
+发布成功后，Maven 项目的 `pom.xml` 可以直接声明：
+
+```xml
+<dependency>
+    <groupId>io.github.blacksnow1</groupId>
+    <artifactId>comtrade-core-java</artifactId>
+    <version>0.1.0</version>
+</dependency>
+```
+
+如果需要发布到 Nexus、Artifactory 等远程 Maven 私服，先在当前用户的 `~/.m2/settings.xml` 中配置
+认证信息。`server` 的 `id` 必须与后续命令的 `repositoryId` 相同；用户名和密码不要提交到仓库：
+
+```xml
+<settings xmlns="http://maven.apache.org/SETTINGS/1.2.0">
+    <servers>
+        <server>
+            <id>internal-releases</id>
+            <username>${env.MAVEN_REPOSITORY_USER}</username>
+            <password>${env.MAVEN_REPOSITORY_PASSWORD}</password>
+        </server>
+    </servers>
+</settings>
+```
+
+然后使用 Maven Deploy Plugin 发布：
+
+```bash
+mvn org.apache.maven.plugins:maven-deploy-plugin:3.1.4:deploy-file \
+  -Dfile=/path/to/comtrade-install/lib/comtrade/java/comtrade-core-java.jar \
+  -DgroupId=io.github.blacksnow1 \
+  -DartifactId=comtrade-core-java \
+  -Dversion=0.1.0 \
+  -Dpackaging=jar \
+  -DrepositoryId=internal-releases \
+  -Durl=https://maven.example.com/repository/maven-releases/
+```
+
+上述 Maven 操作只发布 Java JAR，不会自动发布或加载 JNI 动态库。仍需把 Linux 的
+`libComtradeCoreJava.so`、Windows 的 `ComtradeCoreJava.dll` 或 macOS 的
+`libComtradeCoreJava.dylib` 部署到运行机器，并在 IDEA 的 **VM options** 或 Java 启动命令中指定：
+
+```text
+-Djava.library.path=/absolute/path/to/native
+```
+
 读取已有文件时调用 `record.load(cfgPath, datPath)`，再通过 `getSampleCount()`、
 `getTimestampMicroseconds()`、`getAnalogValue()` 和 `getDigitalValue()` 访问数据。读取值时的通道下标和
 采样下标均从 0 开始。当前 Java 门面对应 `Record`，会把完整 ASCII DAT 载入内存；需要恒定内存的
