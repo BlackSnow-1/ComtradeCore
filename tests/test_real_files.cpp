@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -14,16 +16,96 @@ namespace fs = std::filesystem;
 
 constexpr auto kFixtureStem = "SIMENS/20191024045947";
 
+struct AsciiFixture {
+    const char* test_name;
+    const char* cfg_relative_path;
+    const char* dat_relative_path;
+    std::size_t expected_rows;
+};
+
+constexpr std::array<AsciiFixture, 6> kAsciiFixtures = {{
+    {"Gb2312Cometrade000002", "cometrade/000002.CFG", "cometrade/000002.DAT", 4381},
+    {"Gb2312Cometrade000003", "cometrade/000003.CFG", "cometrade/000003.DAT", 4381},
+    {"Gb2312Cometrade000004", "cometrade/000004.CFG", "cometrade/000004.DAT", 4381},
+    {"Gb2312Siemens20191024045947", "SIMENS/20191024045947.CFG", "SIMENS/20191024045947.DAT", 1740},
+    {"Utf8TransientRecording1",
+     "Transient/example_station_name_Recording_Device_ID_1_20260822_055921_697_TRIP.cfg",
+     "Transient/example_station_name_Recording_Device_ID_1_20260822_055921_697_TRIP.dat", 256001},
+    {"Utf8TransientRecording2",
+     "Transient/example_station_name_Recording_Device_ID_2_20260822_055933_216_TRIP.cfg",
+     "Transient/example_station_name_Recording_Device_ID_2_20260822_055933_216_TRIP.dat", 28927},
+}};
+
+fs::path dataPath(const char* relative_path) {
+    return fs::path(COMTRADE_TEST_DATA_DIR) / relative_path;
+}
+
 fs::path fixturePath(const char* extension) {
     return fs::path(COMTRADE_TEST_DATA_DIR) / (std::string(kFixtureStem) + extension);
 }
 
 bool isGitLfsPointer(const fs::path& path) {
+
     std::ifstream input(path, std::ios::binary);
+
+    // 用于判断文件是不是 Git LFS 指针文件，而不是真正的 COMTRADE 文件
     std::string first_line;
     std::getline(input, first_line);
     return first_line.rfind("version https://git-lfs.github.com/spec/v1", 0) == 0;
 }
+
+class ComtradeAsciiFileTest : public ::testing::TestWithParam<AsciiFixture> {};
+
+TEST_P(ComtradeAsciiFileTest, StreamsEverySampleWithConsistentTimeAndChannelShape) {
+    const auto& fixture = GetParam();
+    const auto cfg_path = dataPath(fixture.cfg_relative_path);
+    const auto dat_path = dataPath(fixture.dat_relative_path);
+    SCOPED_TRACE(fixture.test_name);
+
+    ASSERT_TRUE(fs::exists(cfg_path)) << cfg_path;
+    ASSERT_TRUE(fs::exists(dat_path)) << dat_path;
+    if (isGitLfsPointer(cfg_path) || isGitLfsPointer(dat_path)) {
+        GTEST_SKIP() << "COMTRADE fixture is a Git LFS pointer; run git lfs pull first: " << cfg_path;
+    }
+
+    const comtrade::StreamReader reader(cfg_path.string());
+    const auto& cfg = reader.getCfg();
+    ASSERT_EQ(cfg.data_type, comtrade::DataType::ASCII);
+    ASSERT_EQ(cfg.analog_channels.size(), static_cast<std::size_t>(cfg.analog_count));
+    ASSERT_EQ(cfg.digital_channels.size(), static_cast<std::size_t>(cfg.digital_count));
+    ASSERT_FALSE(cfg.sample_rates.empty());
+    EXPECT_EQ(cfg.sample_rates.back().end_sample, fixture.expected_rows);
+
+    std::size_t callback_count = 0;
+    std::uint32_t previous_raw_timestamp = 0;
+    const auto processed = reader.processDatStream(dat_path.string(), [&](const comtrade::SampleRow& row) {
+        EXPECT_EQ(row.index, callback_count + 1);
+        EXPECT_EQ(row.analog_values.size(), static_cast<std::size_t>(cfg.analog_count));
+        EXPECT_EQ(row.digital_values.size(), static_cast<std::size_t>(cfg.digital_count));
+
+        if (callback_count > 0) EXPECT_GE(row.raw_timestamp, previous_raw_timestamp);
+        previous_raw_timestamp = row.raw_timestamp;
+
+        const auto expected_offset_ns = static_cast<std::int64_t>(std::llround(
+            static_cast<long double>(row.raw_timestamp) *
+            static_cast<long double>(cfg.time_multiplier) * 1000.0L));
+        EXPECT_EQ(row.time_offset.count(), expected_offset_ns);
+        EXPECT_EQ(row.timestamp_us,
+                  static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                      std::chrono::nanoseconds(expected_offset_ns)).count()));
+        EXPECT_EQ(row.absolute_time, cfg.start_time + std::chrono::nanoseconds(expected_offset_ns));
+        ++callback_count;
+    });
+
+    EXPECT_EQ(processed, fixture.expected_rows);
+    EXPECT_EQ(callback_count, fixture.expected_rows);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    AllAsciiRecordings,
+    ComtradeAsciiFileTest,
+    ::testing::ValuesIn(kAsciiFixtures),
+    [](const ::testing::TestParamInfo<AsciiFixture>& info) { return info.param.test_name; });
 
 TEST(ComtradeRealFileAccuracy, SiemensAsciiRecordingMatchesReferenceValues) {
     const auto cfg_path = fixturePath(".CFG");
