@@ -12,6 +12,7 @@
 #include <cmath>
 #include <exception>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -22,6 +23,27 @@ namespace comtrade::detail {
 inline int parseChannelCount(const std::string& token, char suffix) {
     const auto suffix_position = token.find(suffix);
     return std::stoi(token.substr(0, suffix_position));
+}
+
+// 采样段必须完整匹配 "samples_per_second,end_sample"；完整匹配可以将其与日期行可靠区分。
+inline bool tryParseSampleRate(const std::string& line, SampleRate& sample_rate) {
+    const auto tokens = utils::split(line);
+    if (tokens.size() < 2) return false;
+
+    try {
+        std::size_t rate_characters = 0;
+        std::size_t end_characters = 0;
+        const double rate = std::stod(tokens[0], &rate_characters);
+        const auto end_sample = std::stoull(tokens[1], &end_characters);
+        if (rate_characters != tokens[0].size() || end_characters != tokens[1].size() ||
+            !std::isfinite(rate) || rate < 0.0 || end_sample > std::numeric_limits<uint32_t>::max()) {
+            return false;
+        }
+        sample_rate = {rate, static_cast<uint32_t>(end_sample)};
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
 }
 
 // 使用局部 parsed_cfg 进行事务式解析：只有所有必需字段都合法时才覆盖输出 cfg。
@@ -93,25 +115,22 @@ inline bool parseCfgLines(const std::vector<std::string>& lines, CfgData& cfg) {
     if (sample_rate_count < 0 || cursor + static_cast<std::size_t>(sample_rate_count) + 3 > lines.size()) {
         return false;
     }
+    parsed_cfg.variable_sample_rate = sample_rate_count == 0;
 
     parsed_cfg.sample_rates.reserve(static_cast<std::size_t>(sample_rate_count));
     for (int i = 0; i < sample_rate_count; ++i, ++cursor) {
-        const auto tokens = utils::split(lines[cursor]);
-        if (tokens.size() < 2) return false;
-        parsed_cfg.sample_rates.push_back({std::stod(tokens[0]), static_cast<uint32_t>(std::stoul(tokens[1]))});
+        SampleRate sample_rate;
+        if (!tryParseSampleRate(lines[cursor], sample_rate)) return false;
+        parsed_cfg.sample_rates.push_back(sample_rate);
     }
 
-    // Some recorders use nrates=0 for a variable or unspecified sample rate,
-    // but still emit one "0,end_sample" line. Accept that vendor extension
-    // without confusing the following comma-separated start time for a rate.
-    if (sample_rate_count == 0 && cursor < lines.size()) {
-        const auto tokens = utils::split(lines[cursor]);
-        if (tokens.size() >= 2 && tokens[0].find_first_of("/:") == std::string::npos &&
-            tokens[1].find_first_of("/:") == std::string::npos) {
-            parsed_cfg.sample_rates.push_back(
-                {std::stod(tokens[0]), static_cast<uint32_t>(std::stoul(tokens[1]))});
-            ++cursor;
-        }
+    // nrates=0 表示采样率段数量不预先声明；持续读取合法采样段，直到遇到开始时间行。
+    // 同一逻辑也兼容使用该布局的早期厂商文件。
+    while (sample_rate_count == 0 && cursor < lines.size()) {
+        SampleRate sample_rate;
+        if (!tryParseSampleRate(lines[cursor], sample_rate)) break;
+        parsed_cfg.sample_rates.push_back(sample_rate);
+        ++cursor;
     }
 
     if (cursor + 3 > lines.size()) return false;
