@@ -30,6 +30,13 @@ target_include_directories(ComtradeCore INTERFACE
 
 target_compile_features(ComtradeCore INTERFACE cxx_std_17)
 
+# Linux 通常由 libc 提供 iconv，macOS 通常需要显式链接系统 libiconv。
+# 使用导入目标可以让 CMake 为两种情况传播正确的头文件和链接参数。
+if(UNIX)
+    find_package(Iconv REQUIRED)
+    target_link_libraries(ComtradeCore INTERFACE Iconv::Iconv)
+endif()
+
 # ==========================================
 # 2. 构建选项配置
 # ==========================================
