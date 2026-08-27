@@ -214,6 +214,32 @@ namespace {
         EXPECT_THROW(static_cast<void>(comtrade::StreamReader(cfg_path_.string())), std::runtime_error);
     }
 
+    TEST_F(StreamEngineTest, ReaderAcceptsGb2312VendorCfgWithZeroSampleRate) {
+        const std::string gb2312_station = "\xB2\xE2\xCA\xD4"; // GB2312: 测试
+        {
+            std::ofstream cfg_file(cfg_path_, std::ios::binary);
+            ASSERT_TRUE(cfg_file.is_open());
+            cfg_file << gb2312_station << ",DEVICE,1997\r\n"
+                     << "0,0A,0D\r\n"
+                     << "50\r\n"
+                     << "0\r\n"
+                     << "0,2\r\n"
+                     << "01/07/2020,11:54:47.705000\r\n"
+                     << "01/07/2020,11:54:47.955000\r\n"
+                     << "ASCII\r\n"
+                     << "0.001\r\n";
+        }
+
+        const comtrade::StreamReader reader(cfg_path_.string());
+        const auto& cfg = reader.getCfg();
+        EXPECT_EQ(cfg.station_name, gb2312_station);
+        EXPECT_EQ(cfg.data_type, comtrade::DataType::ASCII);
+        ASSERT_EQ(cfg.sample_rates.size(), 1U);
+        EXPECT_DOUBLE_EQ(cfg.sample_rates[0].samples_per_second, 0.0);
+        EXPECT_EQ(cfg.sample_rates[0].end_sample, 2U);
+        EXPECT_DOUBLE_EQ(cfg.time_multiplier, 0.001);
+    }
+
     TEST_F(StreamEngineTest, GeneratesComtradeFilesAndStreamsEverySample) {
         comtrade::Record generated_record;
         generated_record.setStationAndDevice("GRID_01", "RELAY_01", comtrade::StandardVersion::V1999);
