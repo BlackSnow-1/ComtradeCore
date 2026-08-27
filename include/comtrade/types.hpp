@@ -14,10 +14,10 @@
 #include <stdexcept>
 
 namespace comtrade {
-    // 定义纳秒级别的 TimePoint 别名
+    // CFG 的开始/触发时刻保留纳秒精度；DAT 中的时间戳则是相对开始时刻的偏移。
     using TimePoint = std::chrono::time_point<std::chrono::system_clock, std::chrono::nanoseconds>;
 
-
+    // 版本决定 CFG 尾部是否包含 TIMEMULT 和 2013 时间质量字段。
     enum class StandardVersion {
         V1991 = 1991,
         V1999 = 1999,
@@ -25,6 +25,7 @@ namespace comtrade {
         UNKNOWN = 0
     };
 
+    // DAT 的物理编码。当前 Record/StreamReader 只解析 ASCII，StreamWriter 可写全部类型。
     enum class DataType {
         ASCII,
         BINARY,
@@ -78,6 +79,7 @@ namespace comtrade {
     };
 
 
+    // 模拟通道换算关系：工程值 = DAT 原始值 * a + b。
     struct AnalogChannel {
         int index;
         std::string id;
@@ -94,6 +96,7 @@ namespace comtrade {
         std::string ps = "P";
     };
 
+    // 数字通道在 ASCII 中占一列，在二进制 DAT 中每 16 路打包为一个 16-bit word。
     struct DigitalChannel {
         int index;
         std::string id;
@@ -102,11 +105,13 @@ namespace comtrade {
         int normal_state = 0;
     };
 
+    // end_sample 是该采样率段最后一个采样点的序号，而不是该段的样本数量。
     struct SampleRate {
         double samples_per_second = 0.0;
         uint32_t end_sample = 0;
     };
 
+    // 一份 CFG 的内存表示。解析 GB 系编码后，所有文本字段统一保存为 UTF-8。
     struct CfgData {
         std::string station_name; /* 厂站名 */
         std::string rec_dev_id; /* 设备ID */
@@ -122,7 +127,7 @@ namespace comtrade {
         double line_frequency = 50.0;
         DataType data_type = DataType::ASCII;
 
-        // COMTRADE sampling and timestamp metadata.
+        // DAT 第二列为原始时间标记；实际微秒偏移 = 原始值 * time_multiplier。
         std::vector<SampleRate> sample_rates;
         double time_multiplier = 1.0;
 
@@ -142,6 +147,7 @@ namespace comtrade {
         TimePoint trigger_time{};
     };
 
+    // 波形按“通道优先”存储，便于对整条通道进行批量计算。
     struct RecordData {
         std::vector<uint32_t> timestamp;
         std::vector<std::vector<double> > analog_values; // [channel][sample_index]
