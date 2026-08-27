@@ -261,18 +261,11 @@ StreamEngineTest.GeneratesComtradeFilesAndStreamsEverySample
 | 项目 | 测试平台信息 |
 | --- | --- |
 | 操作系统 | Linux（发行版及版本未记录） |
-| CPU 架构 | x86_64 |
-| CPU 运行模式 | 32-bit、64-bit |
-| 地址宽度 | 39 bits physical、48 bits virtual |
-| 字节序 | Little Endian |
 | CPU 型号 | 12th Gen Intel(R) Core(TM) i5-12400 |
-| 逻辑 CPU 数 | 12（在线 CPU：0-11） |
-| 物理拓扑 | 1 路、每路 6 核、每核 2 线程 |
-| 厂商 ID | GenuineIntel |
-| CPU 系列 / 型号 / 步进 | 6 / 151 / 5 |
-| CPU 频率范围 | 800.0000 MHz～5600.0000 MHz（测试时 scaling MHz：32%） |
-| BogoMIPS | 4992.00 |
+| CPU 架构 | x86_64 |
+| CPU 核心 / 线程 | 6 核 / 12 线程 |
 | 内存 | 未记录 |
+| 构建类型 | Release |
 
 测试结果：
 
