@@ -65,8 +65,8 @@ public:
         if (time_code.empty() || local_code.empty() || time_quality_code.empty()) {
             throw std::invalid_argument("2013 time metadata fields must not be empty");
         }
-        if (leap_second < -1 || leap_second > 1) {
-            throw std::invalid_argument("leap second must be -1, 0, or 1");
+        if (leap_second < 0 || leap_second > 3) {
+            throw std::invalid_argument("leap second indicator must be in [0, 3]");
         }
 
         auto& cfg = record_.getMutableCfg();
