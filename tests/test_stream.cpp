@@ -395,6 +395,49 @@ namespace {
         EXPECT_EQ(rows[1].absolute_time, cfg.start_time + std::chrono::microseconds(250));
     }
 
+    TEST_F(StreamEngineTest, Comtrade2013ZeroNratesAcceptsAnyNumberOfSampleRateSegments) {
+        // nrates=0 不代表后续没有采样段，而是段数不在该字段中预先声明。
+        {
+            std::ofstream cfg_file(cfg_path_, std::ios::binary);
+            ASSERT_TRUE(cfg_file.is_open());
+            cfg_file << "GRID_2013,RELAY_2013,2013\r\n"
+                     << "0,0A,0D\r\n"
+                     << "50\r\n"
+                     << "0\r\n"
+                     << "1000,2\r\n"
+                     << "2000,6\r\n"
+                     << "4000,10\r\n"
+                     << "01/07/2020,11:54:47.705000000\r\n"
+                     << "01/07/2020,11:54:47.955000000\r\n"
+                     << "ASCII\r\n"
+                     << "1.0\r\n"
+                     << "UTC,+0800\r\n"
+                     << "4,0\r\n";
+        }
+
+        const comtrade::StreamReader reader(cfg_path_.string());
+        const auto& cfg = reader.getCfg();
+        EXPECT_EQ(cfg.version, comtrade::StandardVersion::V2013);
+        EXPECT_TRUE(cfg.variable_sample_rate);
+        ASSERT_EQ(cfg.sample_rates.size(), 3U);
+        EXPECT_DOUBLE_EQ(cfg.sample_rates[0].samples_per_second, 1000.0);
+        EXPECT_EQ(cfg.sample_rates[0].end_sample, 2U);
+        EXPECT_DOUBLE_EQ(cfg.sample_rates[1].samples_per_second, 2000.0);
+        EXPECT_EQ(cfg.sample_rates[1].end_sample, 6U);
+        EXPECT_DOUBLE_EQ(cfg.sample_rates[2].samples_per_second, 4000.0);
+        EXPECT_EQ(cfg.sample_rates[2].end_sample, 10U);
+
+        // 重新写出并再次解析，确认不会把 nrates=0 错写成实际段数3。
+        comtrade::Record record;
+        ASSERT_TRUE(record.parseCfg(cfg_path_.string()));
+        const auto roundtrip_path = test_directory_ / "roundtrip.cfg";
+        ASSERT_TRUE(record.saveCfg(roundtrip_path.string()));
+
+        const comtrade::StreamReader roundtrip_reader(roundtrip_path.string());
+        EXPECT_TRUE(roundtrip_reader.getCfg().variable_sample_rate);
+        ASSERT_EQ(roundtrip_reader.getCfg().sample_rates.size(), 3U);
+    }
+
     TEST_F(StreamEngineTest, Comtrade2013CfgPreservesPreciseTimeMetadata) {
         // 覆盖 2013 专有尾部字段、9 位小数秒以及小于 1 微秒的 TIMEMULT。
         comtrade::Record generated_record;
