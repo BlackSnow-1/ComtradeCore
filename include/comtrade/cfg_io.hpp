@@ -1,3 +1,7 @@
+/**
+ * @file cfg_io.hpp
+ * @brief 按 IEEE/IEC C37.111 字段顺序解析 CFG，并兼容部分厂商扩展。
+ */
 #pragma once
 
 #include "text_encoding.hpp"
@@ -14,11 +18,13 @@
 
 namespace comtrade::detail {
 
+// 通道计数字段形如 "12A" 或 "29D"，数值部分位于类型后缀之前。
 inline int parseChannelCount(const std::string& token, char suffix) {
     const auto suffix_position = token.find(suffix);
     return std::stoi(token.substr(0, suffix_position));
 }
 
+// 使用局部 parsed_cfg 进行事务式解析：只有所有必需字段都合法时才覆盖输出 cfg。
 inline bool parseCfgLines(const std::vector<std::string>& lines, CfgData& cfg) {
     if (lines.size() < 2) return false;
 
@@ -39,6 +45,7 @@ inline bool parseCfgLines(const std::vector<std::string>& lines, CfgData& cfg) {
         return false;
     }
 
+    // CFG 的后续字段依赖前面声明的通道数，因此使用游标严格顺序消费各行。
     std::size_t cursor = 2;
     parsed_cfg.analog_channels.reserve(static_cast<std::size_t>(parsed_cfg.analog_count));
     for (int i = 0; i < parsed_cfg.analog_count; ++i, ++cursor) {
@@ -143,6 +150,7 @@ inline bool parseCfgLines(const std::vector<std::string>& lines, CfgData& cfg) {
     }
     if (!std::isfinite(parsed_cfg.time_multiplier) || parsed_cfg.time_multiplier <= 0.0) return false;
 
+    // 2013 版追加时间码、时区、质量码和闰秒状态；旧版本没有这两行。
     if (parsed_cfg.version == StandardVersion::V2013) {
         if (cursor + 2 > lines.size()) return false;
 
@@ -161,6 +169,7 @@ inline bool parseCfgLines(const std::vector<std::string>& lines, CfgData& cfg) {
     return true;
 }
 
+// 文件层只负责读取与编码规范化；格式异常统一转换为 false，避免数值转换异常泄漏到调用方。
 inline bool parseCfgFile(const std::string& cfg_filepath, CfgData& cfg) {
     std::ifstream cfg_file(cfg_filepath);
     if (!cfg_file.is_open()) return false;
@@ -171,6 +180,7 @@ inline bool parseCfgFile(const std::string& cfg_filepath, CfgData& cfg) {
         lines.push_back(std::move(line));
     }
 
+    // 解析前统一为 UTF-8，使站名和通道名在 Linux/Windows 上具有一致语义。
     normalizeCfgLinesToUtf8(lines);
 
     try {
