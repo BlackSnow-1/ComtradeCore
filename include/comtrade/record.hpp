@@ -15,6 +15,8 @@
 #include <limits>
 
 namespace comtrade {
+    // Record 持有完整 CFG 和全部波形数据，适合编辑、转储和小中型文件的整体处理。
+    // 大文件或恒定内存场景应改用 StreamReader/StreamWriter。
     class Record {
     public:
         Record() = default;
@@ -42,6 +44,7 @@ namespace comtrade {
         }
 
         inline bool parseDat(const std::string &dat_filepath) {
+            // DAT 的列结构取决于已加载的 CFG，因此调用方应先成功执行 parseCfg。
             if (cfg_.data_type != DataType::ASCII) {
                 std::cerr << "[COMTRADE] Currently only ASCII is supported for parsing.\n";
                 return false;
@@ -59,6 +62,7 @@ namespace comtrade {
                 auto tokens = utils::split(line);
                 if (tokens.size() < static_cast<size_t>(2) + cfg_.analog_count + cfg_.digital_count) continue;
 
+                // TIMEMULT 的单位是“微秒/原始时间单位”。内存中统一保存微秒偏移。
                 const auto raw_timestamp = std::stoul(tokens[1]);
                 const auto timestamp_us = std::llround(raw_timestamp * cfg_.time_multiplier);
                 if (timestamp_us < 0 || timestamp_us > std::numeric_limits<uint32_t>::max()) continue;
@@ -110,6 +114,7 @@ namespace comtrade {
             }
 
             out << cfg_.line_frequency << "\r\n";
+            // 调用方未显式配置采样率时，仅依据前两个时间戳推导一个固定采样率段。
             auto sample_rates = cfg_.sample_rates;
             if (sample_rates.empty()) {
                 double sample_rate = 0.0;
@@ -147,6 +152,7 @@ namespace comtrade {
 
             size_t num_samples = data_.timestamp.size();
             for (size_t i = 0; i < num_samples; ++i) {
+                // DAT 落盘规则与读取互逆：raw = round(timestamp_us / TIMEMULT)。
                 const auto raw_timestamp = std::llround(data_.timestamp[i] / cfg_.time_multiplier);
                 if (raw_timestamp < 0 || raw_timestamp > std::numeric_limits<uint32_t>::max()) return false;
                 out << (i + 1) << "," << raw_timestamp;
@@ -193,6 +199,8 @@ namespace comtrade {
         inline void addSample(const uint32_t timestamp_us,
                               const std::vector<double> &analog_reals,
                               const std::vector<bool> &digital_vals) {
+            // timestamp_us 是相对 cfg_.start_time 的偏移，不是 Unix epoch 时间。
+            // 调用方应为每个已声明通道提供一个值，缺少的列不会被自动补零。
             data_.timestamp.push_back(timestamp_us);
 
             if (data_.analog_values.empty() && cfg_.analog_count > 0) {
