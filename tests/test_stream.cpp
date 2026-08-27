@@ -17,9 +17,11 @@
 #include "comtrade/stream_writer.hpp"
 #include "comtrade/types.hpp"
 
+// 流式引擎测试同时覆盖 ASCII 文本、三种二进制布局、时间精度和 CFG 编码兼容。
 namespace {
     namespace fs = std::filesystem;
 
+    // 构造约束属于公开 API 契约：Reader 必须绑定有效 CFG，且不允许隐式字符串转换。
     static_assert(!std::is_default_constructible_v<comtrade::StreamReader>);
     static_assert(std::is_constructible_v<comtrade::StreamReader, const std::string &>);
     static_assert(!std::is_convertible_v<std::string, comtrade::StreamReader>);
@@ -27,6 +29,7 @@ namespace {
     class StreamEngineTest : public ::testing::Test {
     protected:
         void SetUp() override {
+            // 用测试套件/用例名生成隔离目录，支持 CTest 并行执行而不互相覆盖文件。
             const auto *test_info = ::testing::UnitTest::GetInstance()->current_test_info();
             test_directory_ = fs::temp_directory_path() /
                               (std::string("comtrade_") + test_info->test_suite_name() + "_" + test_info->name());
@@ -46,6 +49,7 @@ namespace {
         static comtrade::CfgData makeCfg(comtrade::DataType data_type,
                                          std::size_t analog_count,
                                          std::size_t digital_count) {
+            // 为各 DAT 编码测试构造最小但内部计数一致的 CFG。
             comtrade::CfgData cfg;
             cfg.data_type = data_type;
 
@@ -81,6 +85,7 @@ namespace {
 
         template<typename T>
         static T readValue(const std::vector<char> &bytes, std::size_t offset) {
+            // memcpy 读取避免测试代码本身因未对齐 reinterpret_cast 产生未定义行为。
             T value{};
             EXPECT_LE(offset + sizeof(T), bytes.size());
             if (offset + sizeof(T) <= bytes.size()) {
@@ -126,6 +131,7 @@ namespace {
         cfg.analog_channels[1].a = 2.0;
         cfg.analog_channels[1].b = -5.0;
 
+        // 17 路数字量跨越两个 16-bit word，可验证边界位和第二个 word 的布局。
         std::vector<bool> digitals(17, false);
         digitals[0] = true;
         digitals[3] = true;
@@ -215,6 +221,7 @@ namespace {
     }
 
     TEST_F(StreamEngineTest, ReaderAcceptsGb2312VendorCfgWithZeroSampleRate) {
+        // 用字节转义构造编码样本，避免测试源码自身编码影响 Windows/MSVC 编译结果。
         const std::string gb2312_station = "\xB2\xE2\xCA\xD4"; // GB2312: 测试
         const std::string utf8_station = "\xE6\xB5\x8B\xE8\xAF\x95";
         {
@@ -262,6 +269,7 @@ namespace {
     }
 
     TEST_F(StreamEngineTest, GeneratesComtradeFilesAndStreamsEverySample) {
+        // 端到端验证 Writer/Record 生成的 CRLF 文件可被 Reader 逐行还原。
         comtrade::Record generated_record;
         generated_record.setStationAndDevice("GRID_01", "RELAY_01", comtrade::StandardVersion::V1999);
 
@@ -310,6 +318,7 @@ namespace {
         EXPECT_EQ(reader.getCfg().digital_count, 2);
 
         std::vector<comtrade::SampleRow> rows;
+        // 地址保持不变证明 Reader 复用单行缓冲；rows.push_back 则示范需要长期保存时应复制。
         const comtrade::SampleRow *reused_row = nullptr;
         const auto row_count = reader.processDatStream(dat_path_.string(), [&](const comtrade::SampleRow &row) {
             if (reused_row == nullptr) {
@@ -346,6 +355,7 @@ namespace {
     }
 
     TEST_F(StreamEngineTest, Comtrade2013CfgPreservesPreciseTimeMetadata) {
+        // 覆盖 2013 专有尾部字段、9 位小数秒以及小于 1 微秒的 TIMEMULT。
         comtrade::Record generated_record;
         generated_record.setStationAndDevice("GRID_2013", "RELAY_2013", comtrade::StandardVersion::V2013);
 
