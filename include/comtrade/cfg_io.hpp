@@ -93,6 +93,21 @@ inline bool parseCfgLines(const std::vector<std::string>& lines, CfgData& cfg) {
         parsed_cfg.sample_rates.push_back({std::stod(tokens[0]), static_cast<uint32_t>(std::stoul(tokens[1]))});
     }
 
+    // Some recorders use nrates=0 for a variable or unspecified sample rate,
+    // but still emit one "0,end_sample" line. Accept that vendor extension
+    // without confusing the following comma-separated start time for a rate.
+    if (sample_rate_count == 0 && cursor < lines.size()) {
+        const auto tokens = utils::split(lines[cursor]);
+        if (tokens.size() >= 2 && tokens[0].find_first_of("/:") == std::string::npos &&
+            tokens[1].find_first_of("/:") == std::string::npos) {
+            parsed_cfg.sample_rates.push_back(
+                {std::stod(tokens[0]), static_cast<uint32_t>(std::stoul(tokens[1]))});
+            ++cursor;
+        }
+    }
+
+    if (cursor + 3 > lines.size()) return false;
+
     const auto& start_time_text = lines[cursor++];
     const auto& trigger_time_text = lines[cursor++];
     parsed_cfg.start_time = utils::parseTime(start_time_text);
@@ -108,6 +123,22 @@ inline bool parseCfgLines(const std::vector<std::string>& lines, CfgData& cfg) {
     if (parsed_cfg.version != StandardVersion::V1991) {
         if (cursor >= lines.size()) return false;
         parsed_cfg.time_multiplier = std::stod(lines[cursor++]);
+    } else if (cursor < lines.size()) {
+        // A few pre-1999 vendor revisions (for example, "1997") already
+        // include the later time-multiplier field. Preserve it when present.
+        const auto tokens = utils::split(lines[cursor]);
+        if (tokens.size() == 1 && !tokens[0].empty()) {
+            try {
+                std::size_t parsed_characters = 0;
+                const double multiplier = std::stod(tokens[0], &parsed_characters);
+                if (parsed_characters == tokens[0].size()) {
+                    parsed_cfg.time_multiplier = multiplier;
+                    ++cursor;
+                }
+            } catch (const std::exception&) {
+                // A non-numeric trailing extension is unrelated to TIMEMULT.
+            }
+        }
     }
     if (!std::isfinite(parsed_cfg.time_multiplier) || parsed_cfg.time_multiplier <= 0.0) return false;
 
