@@ -138,6 +138,7 @@ namespace comtrade {
         std::string time_code = "UTC";
         std::string local_code = "+0";
         std::string time_quality_code = "F";
+        // 0=no adjustment, 1=added, 2=subtracted, 3=time source cannot handle leap seconds.
         int leap_second = 0;
 
         // Number of fractional second digits used when serializing CFG time
