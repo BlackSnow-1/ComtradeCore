@@ -216,6 +216,7 @@ namespace {
 
     TEST_F(StreamEngineTest, ReaderAcceptsGb2312VendorCfgWithZeroSampleRate) {
         const std::string gb2312_station = "\xB2\xE2\xCA\xD4"; // GB2312: 测试
+        const std::string utf8_station = "\xE6\xB5\x8B\xE8\xAF\x95";
         {
             std::ofstream cfg_file(cfg_path_, std::ios::binary);
             ASSERT_TRUE(cfg_file.is_open());
@@ -232,12 +233,32 @@ namespace {
 
         const comtrade::StreamReader reader(cfg_path_.string());
         const auto& cfg = reader.getCfg();
-        EXPECT_EQ(cfg.station_name, gb2312_station);
+        EXPECT_EQ(cfg.station_name, utf8_station);
         EXPECT_EQ(cfg.data_type, comtrade::DataType::ASCII);
         ASSERT_EQ(cfg.sample_rates.size(), 1U);
         EXPECT_DOUBLE_EQ(cfg.sample_rates[0].samples_per_second, 0.0);
         EXPECT_EQ(cfg.sample_rates[0].end_sample, 2U);
         EXPECT_DOUBLE_EQ(cfg.time_multiplier, 0.001);
+    }
+
+    TEST_F(StreamEngineTest, ReaderPreservesUtf8MetadataAndRemovesBom) {
+        const std::string utf8_station = "\xE6\xB5\x8B\xE8\xAF\x95";
+        {
+            std::ofstream cfg_file(cfg_path_, std::ios::binary);
+            ASSERT_TRUE(cfg_file.is_open());
+            cfg_file << "\xEF\xBB\xBF" << utf8_station << ",DEVICE,1999\r\n"
+                     << "0,0A,0D\r\n"
+                     << "50\r\n"
+                     << "1\r\n"
+                     << "1000,1\r\n"
+                     << "01/07/2020,11:54:47.705000\r\n"
+                     << "01/07/2020,11:54:47.955000\r\n"
+                     << "ASCII\r\n"
+                     << "1.0\r\n";
+        }
+
+        const comtrade::StreamReader reader(cfg_path_.string());
+        EXPECT_EQ(reader.getCfg().station_name, utf8_station);
     }
 
     TEST_F(StreamEngineTest, GeneratesComtradeFilesAndStreamsEverySample) {
