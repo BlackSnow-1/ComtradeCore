@@ -3,12 +3,13 @@
 #include <fstream>
 #include <cstdio> // for std::remove
 
+// Record 测试关注“整份数据驻留内存”的编辑与读写往返；流式行为由 test_stream.cpp 覆盖。
 class ComtradeRecordTest : public ::testing::Test {
 protected:
     std::string test_cfg = "test_unified.cfg";
     std::string test_dat = "test_unified.dat";
 
-    // 测试结束后自动清理生成的临时文件
+    // 每个用例使用固定文件名，因此必须在 TearDown 中清理，避免结果污染下一用例。
     void TearDown() override {
         std::remove(test_cfg.c_str());
         std::remove(test_dat.c_str());
@@ -60,7 +61,7 @@ TEST_F(ComtradeRecordTest, WriteAndParseLifecycle) {
     EXPECT_EQ(reader.getCfg().analog_count, 1);
     EXPECT_EQ(reader.getCfg().digital_count, 1);
 
-    // 验证波形数据 (经过 real -> raw -> real 的转换逻辑)
+    // 验证工程量经过 real -> raw -> real 量化后仍与可表示的输入一致。
     const auto& data = reader.getData();
     ASSERT_EQ(data.timestamp.size(), 2);
 
@@ -101,7 +102,7 @@ TEST_F(ComtradeRecordTest, InMemoryManipulation) {
     // 修改站名 (使用 getMutableCfg)
     modifier.getMutableCfg().station_name = "Modified_Station";
 
-    // 修改采样值 (将 220.0 注入谐波干扰修改为 250.0)
+    // 直接修改列式数据，验证可变访问器的修改能被后续 saveDat 持久化。
     modifier.getMutableData().analog_values[0][0] = 250.0;
 
     // 另存为新文件 (这里为了测试方便直接覆盖原文件)
