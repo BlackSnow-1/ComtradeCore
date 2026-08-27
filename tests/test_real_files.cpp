@@ -93,7 +93,7 @@ TEST_P(ComtradeAsciiFileTest, StreamsEverySampleWithConsistentTimeAndChannelShap
     EXPECT_EQ(cfg.sample_rates.back().end_sample, fixture.expected_rows);
 
     std::size_t callback_count = 0;
-    std::uint32_t previous_raw_timestamp = 0;
+    std::uint64_t previous_raw_timestamp = 0;
     const auto processed = reader.processDatStream(dat_path.string(), [&](const comtrade::SampleRow& row) {
         EXPECT_EQ(row.index, callback_count + 1);
         EXPECT_EQ(row.analog_values.size(), static_cast<std::size_t>(cfg.analog_count));
