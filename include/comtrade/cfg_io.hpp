@@ -1,5 +1,6 @@
 #pragma once
 
+#include "text_encoding.hpp"
 #include "types.hpp"
 #include "utils.hpp"
 
@@ -169,6 +170,8 @@ inline bool parseCfgFile(const std::string& cfg_filepath, CfgData& cfg) {
     while (std::getline(cfg_file, line)) {
         lines.push_back(std::move(line));
     }
+
+    normalizeCfgLinesToUtf8(lines);
 
     try {
         return parseCfgLines(lines, cfg);
