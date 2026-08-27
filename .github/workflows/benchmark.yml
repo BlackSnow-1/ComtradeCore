@@ -1,0 +1,71 @@
+name: Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      iterations:
+        description: Number of complete DAT reads
+        required: true
+        default: "100"
+  schedule:
+    - cron: "0 2 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: benchmark-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stream-reader:
+    name: Stream reader benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BENCHMARK_ITERATIONS: ${{ inputs.iterations || '100' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Fetch benchmark fixture
+        run: >-
+          git lfs pull
+          --include="tests/ComtradeFiles/SIMENS/20191024045947.CFG,tests/ComtradeFiles/SIMENS/20191024045947.DAT"
+          --exclude=""
+
+      - name: Configure
+        run: >-
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_COMPILER=g++
+          -DCOMTRADE_BUILD_TESTS=OFF
+          -DCOMTRADE_BUILD_EXAMPLES=OFF
+          -DCOMTRADE_BUILD_BENCHMARKS=ON
+
+      - name: Build benchmark
+        run: cmake --build build --config Release --target comtrade_stream_benchmark --parallel 2
+
+      - name: Run benchmark
+        run: |
+          build/benchmarks/comtrade_stream_benchmark \
+            tests/ComtradeFiles/SIMENS/20191024045947.CFG \
+            tests/ComtradeFiles/SIMENS/20191024045947.DAT \
+            "$BENCHMARK_ITERATIONS" | tee benchmark.txt
+          {
+            echo '## Stream reader benchmark'
+            echo '```text'
+            cat benchmark.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload benchmark result
+        uses: actions/upload-artifact@v7
+        with:
+          name: stream-reader-benchmark-${{ github.run_id }}
+          path: benchmark.txt
+          if-no-files-found: error
+          retention-days: 30
