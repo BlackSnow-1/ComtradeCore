@@ -43,11 +43,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Fetch accuracy-test fixture
+      - name: Fetch ASCII accuracy-test fixtures
         shell: bash
         run: >-
           git lfs pull
-          --include="tests/ComtradeFiles/SIMENS/20191024045947.CFG,tests/ComtradeFiles/SIMENS/20191024045947.DAT"
+          --include="tests/ComtradeFiles/cometrade/*.CFG,tests/ComtradeFiles/cometrade/*.DAT,tests/ComtradeFiles/SIMENS/20191024045947.CFG,tests/ComtradeFiles/SIMENS/20191024045947.DAT,tests/ComtradeFiles/Transient/*.cfg,tests/ComtradeFiles/Transient/*.dat"
           --exclude=""
 
       - name: Configure
