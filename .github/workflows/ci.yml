@@ -32,6 +32,10 @@ jobs:
             os: ubuntu-latest
             compiler: -DCMAKE_CXX_COMPILER=clang++
             artifact: linux-clang
+          - name: macOS Apple Clang
+            os: macos-latest
+            compiler: -DCMAKE_CXX_COMPILER=/usr/bin/clang++
+            artifact: macos-apple-clang
           - name: Windows MSVC
             os: windows-latest
             compiler: ""
@@ -49,6 +53,10 @@ jobs:
           git lfs pull
           --include="tests/ComtradeFiles/cometrade/*.CFG,tests/ComtradeFiles/cometrade/*.DAT,tests/ComtradeFiles/SIMENS/20191024045947.CFG,tests/ComtradeFiles/SIMENS/20191024045947.DAT,tests/ComtradeFiles/Transient/*.cfg,tests/ComtradeFiles/Transient/*.dat"
           --exclude=""
+
+      - name: Show Apple Clang version
+        if: runner.os == 'macOS'
+        run: /usr/bin/clang++ --version
 
       - name: Configure
         run: >-
