@@ -294,19 +294,29 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
 mvn -U clean package
 ```
 
-运行时必须让 JVM 找到 JNI 动态库：
+运行时必须让 JVM 找到 JNI 动态库，并允许未命名模块访问本地代码：
+
+> [!IMPORTANT]
+> 在 IntelliJ IDEA 的 **VM options** 或 `java` 命令中，必须加入下面两个 JVM 参数：
+>
+> ```text
+> --enable-native-access=ALL-UNNAMED -Djava.library.path=/home/wangguangbo/ComtradeCore/install/lib/comtrade/java
+> ```
+>
+> `--enable-native-access=ALL-UNNAMED` 用于允许当前 JAR 中的 JNI 代码访问本地库，避免新版 JDK 的本地访问警告以及将来的访问阻止；`-Djava.library.path=...` 用于让 JVM 找到 `libComtradeCoreJava.so`。这些参数必须写在 `-jar` 或主类名称之前，不能放在程序参数（Program arguments）中。其他用户部署时，请将路径替换为自己的实际安装路径。
 
 ```bash
 java \
-  -Djava.library.path=/absolute/path/to/ComtradeCore/install/lib/comtrade/java \
+  --enable-native-access=ALL-UNNAMED \
+  -Djava.library.path=/home/wangguangbo/ComtradeCore/install/lib/comtrade/java \
   -jar target/your-application.jar
 ```
 
 也可以为当前进程设置动态库搜索目录：
 
 ```bash
-LD_LIBRARY_PATH=/absolute/path/to/ComtradeCore/install/lib/comtrade/java \
-  java -jar target/your-application.jar
+LD_LIBRARY_PATH=/home/wangguangbo/ComtradeCore/install/lib/comtrade/java \
+  java --enable-native-access=ALL-UNNAMED -jar target/your-application.jar
 ```
 
 检查 `.so` 是否缺少系统依赖：
