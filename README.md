@@ -220,6 +220,155 @@ tasks.withType(JavaExec).configureEach {
 }
 ```
 
+### Linux 下构建、部署与 Maven 引入
+
+以下以 Ubuntu/Debian 为例。先安装 C++、SWIG、JDK 和 Maven：
+
+```bash
+sudo apt update
+sudo apt install -y git build-essential cmake swig openjdk-17-jdk maven
+```
+
+如果使用系统中已经安装的其他完整 JDK（例如 OpenJDK 25）也可以。通过 `javac` 确认 JDK 根目录：
+
+```bash
+readlink -f "$(which javac)"
+```
+
+例如输出 `/usr/lib/jvm/java-25-openjdk-amd64/bin/javac` 时，可在当前终端设置：
+
+```bash
+export JAVA_HOME=/usr/lib/jvm/java-25-openjdk-amd64
+export PATH="$JAVA_HOME/bin:$PATH"
+```
+
+从项目根目录执行完整 JNI 构建和安装：
+
+```bash
+cmake -S . -B build-java \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_JAVA_BINDINGS=ON \
+  -DCOMTRADE_BUILD_TESTS=OFF \
+  -DCOMTRADE_BUILD_EXAMPLES=OFF \
+  -DCOMTRADE_BUILD_BENCHMARKS=OFF \
+  -DCMAKE_INSTALL_PREFIX="$PWD/install"
+
+cmake --build build-java --parallel "$(nproc)"
+cmake --install build-java
+```
+
+安装结果为：
+
+```text
+<ComtradeCore>/install/lib/comtrade/java/
+├── comtrade-core-java.jar
+└── libComtradeCoreJava.so
+```
+
+将 JAR 安装到当前 Linux 用户的 Maven 本地仓库；不要使用 `sudo mvn`，否则依赖会进入 root 用户的
+`~/.m2`，普通用户构建项目时仍然无法找到：
+
+```bash
+mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
+  -Dfile="$PWD/install/lib/comtrade/java/comtrade-core-java.jar" \
+  -DgroupId=io.github.blacksnow1 \
+  -DartifactId=comtrade-core-java \
+  -Dversion=0.1.0 \
+  -Dpackaging=jar \
+  -DgeneratePom=true
+```
+
+在 Java 项目的 `pom.xml` 中加入：
+
+```xml
+<dependency>
+    <groupId>io.github.blacksnow1</groupId>
+    <artifactId>comtrade-core-java</artifactId>
+    <version>0.1.0</version>
+</dependency>
+```
+
+然后在 Java 项目根目录构建：
+
+```bash
+mvn -U clean package
+```
+
+运行时必须让 JVM 找到 JNI 动态库：
+
+```bash
+java \
+  -Djava.library.path=/absolute/path/to/ComtradeCore/install/lib/comtrade/java \
+  -jar target/your-application.jar
+```
+
+也可以为当前进程设置动态库搜索目录：
+
+```bash
+LD_LIBRARY_PATH=/absolute/path/to/ComtradeCore/install/lib/comtrade/java \
+  java -jar target/your-application.jar
+```
+
+检查 `.so` 是否缺少系统依赖：
+
+```bash
+ldd /absolute/path/to/ComtradeCore/install/lib/comtrade/java/libComtradeCoreJava.so
+```
+
+输出中没有 `not found` 即可。通过 Windows IDEA 的 SSH 运行目标部署到 Linux 时，应在 Maven 运行配置
+中选择该 SSH 目标，并为目标添加 Linux JDK 与 Maven 运行时；Windows 与 Linux 的 Maven 本地仓库互不
+共享。若需要让项目导入、代码索引、编译和运行全部使用 Linux 环境，建议通过 JetBrains Gateway 直接
+打开远程 Linux 项目。
+
+### Windows 下引入 JAR
+
+将构建产物复制到 Windows Java 项目，例如：
+
+```text
+D:\testjavaInterface\libs\
+├── comtrade-core-java.jar
+└── native\
+    └── ComtradeCoreJava.dll
+```
+
+如果项目使用 Maven，可在 PowerShell 中把 JAR 安装到当前 Windows 用户的本地仓库：
+
+```powershell
+mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file `
+  "-Dfile=D:\testjavaInterface\libs\comtrade-core-java.jar" `
+  "-DgroupId=io.github.blacksnow1" `
+  "-DartifactId=comtrade-core-java" `
+  "-Dversion=0.1.0" `
+  "-Dpackaging=jar" `
+  "-DgeneratePom=true"
+```
+
+安装位置默认为：
+
+```text
+%USERPROFILE%\.m2\repository\io\github\blacksnow1\comtrade-core-java\0.1.0\
+```
+
+随后在项目的 `pom.xml` 中声明：
+
+```xml
+<dependency>
+    <groupId>io.github.blacksnow1</groupId>
+    <artifactId>comtrade-core-java</artifactId>
+    <version>0.1.0</version>
+</dependency>
+```
+
+重新加载 Maven 项目后即可编译。若程序也在 Windows 本机运行，还需在 IDEA 的 **VM options** 中添加：
+
+```text
+-Djava.library.path=D:\testjavaInterface\libs\native
+```
+
+并确保该目录包含与当前 JVM CPU 架构一致的 `ComtradeCoreJava.dll`。如果 Windows IDEA 只负责编译、
+程序通过 SSH 目标在 Linux 运行，则 Windows 侧只需安装 JAR；远程运行配置应使用 Linux 的
+`libComtradeCoreJava.so` 及其 Linux 路径，不能使用 Windows DLL。
+
 ### 发布到 Maven 仓库
 
 CMake 生成的 JAR 不是由 Maven 项目构建的，因此可以使用 Maven Install Plugin 将它发布到当前用户的
