@@ -1,4 +1,4 @@
-%module(package="comtrade") ComtradeCoreNative
+%module(directors="1", package="comtrade") ComtradeCoreNative
 %{
 #include "java_api.hpp"
 %}
@@ -13,5 +13,8 @@ namespace std {
     %template(IntVector) vector<int>;
 }
 
-// Expose only the stable Java facade, not every internal C++ data structure.
+%ignore ComtradeNativeRecord::nativeCfg;
+%feature("director") ComtradeNativeRowCallback;
+
+// Expose Java-safe facades, not chrono/vector<bool> implementation details.
 %include "java_api.hpp"

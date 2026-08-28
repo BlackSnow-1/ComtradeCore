@@ -9,6 +9,7 @@
 [![COMTRADE](https://img.shields.io/badge/COMTRADE-1991%20%7C%201999%20%7C%202013-6f42c1)](#功能概览)
 [![Platforms](https://img.shields.io/badge/Platforms-Linux%20%7C%20Windows%20%7C%20macOS-informational)](.github/workflows/ci.yml)
 [![Java JNI](https://img.shields.io/badge/Java-JNI%20binding-ED8B00?logo=openjdk&logoColor=white)](#java-绑定)
+[![Powered by OrcaRouter](https://img.shields.io/badge/Powered_by-OrcaRouter-2563eb)](https://www.orcarouter.ai/ref/ref_a19e06c4695c9bfa903a)
 
 ComtradeCore 是一个轻量、Header-only 的 C++17 COMTRADE 库，用于构造、写入和流式读取电力系统暂态记录。
 核心功能无第三方库依赖；CFG 中文编码转换在 Linux/macOS 使用系统 `iconv`，在 Windows 使用系统编码 API。
@@ -129,8 +130,9 @@ target_include_directories(your_app PRIVATE /path/to/ComtradeCore/include)
 
 ## Java 绑定
 
-Java 绑定提供 `comtrade.ComtradeRecord`，用于读写内存中的 ASCII COMTRADE 记录。它由一个 JAR 和
-一个 JNI 动态库组成：Java 项目在编译期引入 JAR，运行时还必须能够找到当前平台对应的动态库。
+Java 绑定提供 `comtrade.ComtradeRecord`、`ComtradeStreamReader` 和 `ComtradeStreamWriter`，覆盖内存型
+记录以及恒定内存流式读写。它由一个 JAR 和一个 JNI 动态库组成：Java 项目在编译期引入 JAR，运行时
+还必须能够找到当前平台对应的动态库。
 它不是一个不依赖本地代码的纯 Java JAR。
 
 ### 构建和安装
@@ -279,10 +281,17 @@ mvn org.apache.maven.plugins:maven-deploy-plugin:3.1.4:deploy-file \
 -Djava.library.path=/absolute/path/to/native
 ```
 
+以上配置参考 Apache Maven 官方的
+[Install Plugin `install-file`](https://maven.apache.org/plugins/maven-install-plugin/install-file-mojo.html)、
+[Deploy Plugin `deploy-file`](https://maven.apache.org/plugins/maven-deploy-plugin/deploy-file-mojo.html) 和
+[`settings.xml` 配置参考](https://maven.apache.org/settings.html)。
+
 读取已有文件时调用 `record.load(cfgPath, datPath)`，再通过 `getSampleCount()`、
-`getTimestampMicroseconds()`、`getAnalogValue()` 和 `getDigitalValue()` 访问数据。读取值时的通道下标和
-采样下标均从 0 开始。当前 Java 门面对应 `Record`，会把完整 ASCII DAT 载入内存；需要恒定内存的
-Java 流式回调接口尚未包含在此绑定中。
+`getTimestampMicroseconds()`、`getAnalogValue()` 和 `getDigitalValue()` 访问数据。Java 门面也提供完整
+通道字段、采样率段、CFG 时间信息及其修改接口；读取值时的通道位置和采样位置均从 0 开始。
+
+大文件可使用 `ComtradeStreamReader.processDatStream()` 逐行回调；写入时可从当前
+`ComtradeRecord` 配置快照创建 `ComtradeStreamWriter`，它支持 ASCII、BINARY、BINARY32 和 FLOAT32。
 
 ## 生成 COMTRADE 文件
 

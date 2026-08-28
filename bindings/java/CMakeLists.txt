@@ -41,6 +41,9 @@ set(COMTRADE_SWIG_JAVA_SOURCES
         "${COMTRADE_JAVA_PACKAGE_DIR}/ComtradeCoreNative.java"
         "${COMTRADE_JAVA_PACKAGE_DIR}/ComtradeCoreNativeJNI.java"
         "${COMTRADE_JAVA_PACKAGE_DIR}/ComtradeNativeRecord.java"
+        "${COMTRADE_JAVA_PACKAGE_DIR}/ComtradeNativeRowCallback.java"
+        "${COMTRADE_JAVA_PACKAGE_DIR}/ComtradeNativeStreamReader.java"
+        "${COMTRADE_JAVA_PACKAGE_DIR}/ComtradeNativeStreamWriter.java"
         "${COMTRADE_JAVA_PACKAGE_DIR}/DoubleVector.java"
         "${COMTRADE_JAVA_PACKAGE_DIR}/IntVector.java"
 )
@@ -50,6 +53,8 @@ add_jar(ComtradeCoreJavaJar
         SOURCES
         ${COMTRADE_SWIG_JAVA_SOURCES}
         "${CMAKE_CURRENT_SOURCE_DIR}/src/main/java/comtrade/ComtradeRecord.java"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/main/java/comtrade/ComtradeStreamReader.java"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/main/java/comtrade/ComtradeStreamWriter.java"
         OUTPUT_NAME comtrade-core-java
         OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}"
 )
