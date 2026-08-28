@@ -17,6 +17,7 @@
 #include <utility>
 #include <vector>
 
+#ifndef SWIG
 namespace comtrade_java_detail {
 
 template<typename Index>
@@ -67,6 +68,7 @@ inline std::string formatCfgTime(const comtrade::CfgData& cfg, const comtrade::T
 }
 
 }  // namespace comtrade_java_detail
+#endif
 
 /**
  * SWIG exposes this facade instead of chrono and vector<bool> based C++ types.
