@@ -14,6 +14,7 @@ set(SWIG_OUTFILE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/cxx")
 set_source_files_properties(comtrade.i PROPERTIES
         CPLUSPLUS ON
         USE_TARGET_INCLUDE_DIRECTORIES TRUE
+        COMPILE_OPTIONS "-package;comtrade"
 )
 
 swig_add_library(ComtradeCoreJava

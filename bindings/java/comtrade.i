@@ -1,4 +1,4 @@
-%module(directors="1", package="comtrade") ComtradeCoreNative
+%module(directors="1") ComtradeCoreNative
 %{
 #include "java_api.hpp"
 %}
