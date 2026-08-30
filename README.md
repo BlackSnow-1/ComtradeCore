@@ -11,6 +11,8 @@
 [![Java JNI](https://img.shields.io/badge/Java-JNI%20binding-ED8B00?logo=openjdk&logoColor=white)](#java-绑定)
 [![Powered by OrcaRouter](https://img.shields.io/badge/Powered_by-OrcaRouter-2563eb)](https://www.orcarouter.ai/ref/ref_a19e06c4695c9bfa903a)
 
+> 🚀 **AI 模型 API 服务推荐：** [通过专属推广链接访问 OrcaRouter](https://www.orcarouter.ai/ref/ref_a19e06c4695c9bfa903a)
+
 ComtradeCore 是一个轻量、Header-only 的 C++17 COMTRADE 库，用于构造、写入和流式读取电力系统暂态记录。
 核心功能无第三方库依赖；CFG 中文编码转换在 Linux/macOS 使用系统 `iconv`，在 Windows 使用系统编码 API。
 
