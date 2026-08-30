@@ -452,6 +452,56 @@ mvn org.apache.maven.plugins:maven-deploy-plugin:3.1.4:deploy-file \
 大文件可使用 `ComtradeStreamReader.processDatStream()` 逐行回调；写入时可从当前
 `ComtradeRecord` 配置快照创建 `ComtradeStreamWriter`，它支持 ASCII、BINARY、BINARY32 和 FLOAT32。
 
+### Java 流式读取示例
+
+流式读取会同步逐采样执行回调，不会将整份 DAT 文件加载到内存中，适合处理大文件。当前流式读取仅
+支持 ASCII DAT；BINARY、BINARY32 和 FLOAT32 暂时只能流式写入。
+
+```java
+package org.example;
+
+import comtrade.ComtradeStreamReader;
+
+import java.util.Arrays;
+
+public final class Main {
+    public static void main(String[] args) {
+        String cfgPath = "/home/wangguangbo/ComtradeFiles/cometrade/000002.CFG";
+        String datPath = "/home/wangguangbo/ComtradeFiles/cometrade/000002.DAT";
+
+        try (ComtradeStreamReader reader = new ComtradeStreamReader(cfgPath)) {
+            System.out.println("站点：" + reader.getStationName());
+            System.out.println("设备：" + reader.getDeviceId());
+            System.out.println("DAT 类型：" + reader.getDataType());
+            System.out.println("模拟量通道数：" + reader.getAnalogChannelCount());
+            System.out.println("数字量通道数：" + reader.getDigitalChannelCount());
+
+            long processed = reader.processDatStream(datPath, row -> {
+                // 每收到一个采样行就立即打印。
+                System.out.printf(
+                        "采样=%d, 原始时间戳=%d, 时间=%s, 模拟量=%s, 数字量=%s%n",
+                        row.index,
+                        row.rawTimestamp,
+                        row.absoluteTime,
+                        Arrays.toString(row.analogValues),
+                        Arrays.toString(row.digitalValues));
+            });
+
+            System.out.println("流式读取完成，共处理 " + processed + " 个采样");
+        }
+    }
+}
+```
+
+在 IntelliJ IDEA 中运行时，把下面内容放入运行配置的 **VM options**：
+
+```text
+--enable-native-access=ALL-UNNAMED -Djava.library.path=/home/wangguangbo/ComtradeCore/install/lib/comtrade/java
+```
+
+如果 `reader.getDataType()` 输出的不是 `ASCII`，当前版本不能流式读取该 DAT，可改用普通读取接口，
+或者先将文件转换为 ASCII COMTRADE。
+
 ## 生成 COMTRADE 文件
 
 下面的示例生成一组 ASCII 格式的 `record.cfg` 和 `record.dat`：
