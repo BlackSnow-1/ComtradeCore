@@ -330,6 +330,142 @@ ldd /absolute/path/to/ComtradeCore/install/lib/comtrade/java/libComtradeCoreJava
 共享。若需要让项目导入、代码索引、编译和运行全部使用 Linux 环境，建议通过 JetBrains Gateway 直接
 打开远程 Linux 项目。
 
+### Windows 下编译 Java 绑定
+
+推荐使用 64 位 JDK 和 Visual Studio 2022 的 MSVC x64 工具链。编译前需要安装：
+
+- Visual Studio 2022，并勾选 **使用 C++ 的桌面开发**；
+- CMake；
+- SWIG 4.0 或更高版本；
+- 完整的 64 位 JDK（不能只安装 JRE）。
+
+打开 PowerShell，确认这些命令都能被找到：
+
+```powershell
+cmake --version
+swig -version
+javac -version
+java -version
+```
+
+如果尚未配置 `JAVA_HOME`，将它设置为 JDK 根目录。该目录下应直接包含 `bin\java.exe` 和
+`bin\javac.exe`：
+
+```powershell
+$env:JAVA_HOME = "C:\Program Files\Java\jdk-25"
+$env:Path = "$env:JAVA_HOME\bin;$env:Path"
+```
+
+以上设置只对当前 PowerShell 窗口有效。请根据实际安装位置修改 JDK 路径，并确保 JDK、Visual Studio
+生成目标和最终运行程序都是相同的 CPU 架构，例如均为 x64。
+
+在 ComtradeCore 项目根目录执行：
+
+```powershell
+cmake -S . -B build-java-windows `
+  -G "Visual Studio 17 2022" `
+  -A x64 `
+  -DBUILD_JAVA_BINDINGS=ON `
+  -DCOMTRADE_BUILD_TESTS=OFF `
+  -DCOMTRADE_BUILD_EXAMPLES=OFF `
+  -DCOMTRADE_BUILD_BENCHMARKS=OFF `
+  "-DCMAKE_INSTALL_PREFIX=$PWD\install-windows"
+
+cmake --build build-java-windows --config Release --parallel
+cmake --install build-java-windows --config Release
+```
+
+安装完成后会生成：
+
+```text
+<ComtradeCore>\install-windows\lib\comtrade\java\
+├── comtrade-core-java.jar
+└── ComtradeCoreJava.dll
+```
+
+#### 使用 Windows GCC（MinGW-w64）编译
+
+Windows 下也可以使用 GCC，但必须使用面向 Windows 的 **MinGW-w64** 工具链，不能使用 WSL 中面向
+Linux 的 GCC，也不要使用 Cygwin GCC。项目包含 C++ 代码，因此除了 `gcc` 还必须提供 `g++`。
+
+在 PowerShell 中确认工具链可以被找到：
+
+```powershell
+gcc --version
+g++ --version
+mingw32-make --version
+g++ -dumpmachine
+```
+
+建议 `g++ -dumpmachine` 的输出包含 `x86_64-w64-mingw32`，并使用同为 x64 的 JDK。将 MinGW-w64 的
+`bin` 目录加入 `PATH` 后，在项目根目录执行：
+
+```powershell
+cmake -S . -B build-java-mingw `
+  -G "MinGW Makefiles" `
+  -DCMAKE_BUILD_TYPE=Release `
+  -DBUILD_JAVA_BINDINGS=ON `
+  -DCOMTRADE_BUILD_TESTS=OFF `
+  -DCOMTRADE_BUILD_EXAMPLES=OFF `
+  -DCOMTRADE_BUILD_BENCHMARKS=OFF `
+  "-DCMAKE_INSTALL_PREFIX=$PWD\install-windows-mingw"
+
+cmake --build build-java-mingw --parallel
+cmake --install build-java-mingw
+```
+
+不要让 MinGW 构建复用前面由 Visual Studio 生成的 `build-java-windows` 目录；CMake 构建目录只能对应
+一个生成器和一套编译器。MinGW 安装结果位于：
+
+```text
+<ComtradeCore>\install-windows-mingw\lib\comtrade\java\
+├── comtrade-core-java.jar
+└── ComtradeCoreJava.dll
+```
+
+MinGW 生成的 `ComtradeCoreJava.dll` 还可能依赖以下 GCC 运行库，具体名称取决于所安装的 MinGW-w64
+版本和线程模型：
+
+```text
+libstdc++-6.dll
+libgcc_s_seh-1.dll
+libwinpthread-1.dll
+```
+
+可以检查实际依赖：
+
+```powershell
+objdump -p .\install-windows-mingw\lib\comtrade\java\ComtradeCoreJava.dll | Select-String "DLL Name"
+```
+
+运行 Java 程序时，需要保持 MinGW-w64 的 `bin` 目录位于 `PATH` 中，或者将上述实际依赖的运行库
+DLL 与 `ComtradeCoreJava.dll` 一起部署。Java 的 VM options 对应改为：
+
+```text
+--enable-native-access=ALL-UNNAMED -Djava.library.path=D:\GitHubProjects\ComtradeCore\install-windows-mingw\lib\comtrade\java
+```
+
+如果使用前面的 Visual Studio 构建产物，并在 Windows 本机运行 Java 程序，应把以下内容加入
+IntelliJ IDEA 的 **VM options**；路径需按项目实际位置修改：
+
+```text
+--enable-native-access=ALL-UNNAMED -Djava.library.path=D:\GitHubProjects\ComtradeCore\install-windows\lib\comtrade\java
+```
+
+也可以直接从 PowerShell 启动：
+
+```powershell
+java --enable-native-access=ALL-UNNAMED `
+  "-Djava.library.path=D:\GitHubProjects\ComtradeCore\install-windows\lib\comtrade\java" `
+  -cp "D:\GitHubProjects\ComtradeCore\install-windows\lib\comtrade\java\comtrade-core-java.jar;." `
+  org.example.Main
+```
+
+> [!IMPORTANT]
+> Windows 生成的 `ComtradeCoreJava.dll` 只能在 Windows 上使用，不能复制到 Linux 运行。Linux 必须
+> 单独编译并使用 `libComtradeCoreJava.so`；JAR 可以跨平台复用，但本地动态库必须与操作系统和 CPU
+> 架构匹配。
+
 ### Windows 下引入 JAR
 
 将构建产物复制到 Windows Java 项目，例如：
