@@ -583,7 +583,8 @@ mvn org.apache.maven.plugins:maven-deploy-plugin:3.1.4:deploy-file \
 [Deploy Plugin `deploy-file`](https://maven.apache.org/plugins/maven-deploy-plugin/deploy-file-mojo.html) 和
 [`settings.xml` 配置参考](https://maven.apache.org/settings.html)。
 
-读取已有文件时调用 `record.load(cfgPath, datPath)`，再通过 `getSampleCount()`、
+读取已有文件时调用 `record.load(cfgPath, datPath)`，它会根据 CFG 自动解析 ASCII、BINARY、BINARY32
+或 FLOAT32；CFG 和 ASCII DAT 开头的 UTF-8 BOM 也会自动移除。随后可通过 `getSampleCount()`、
 `getTimestampMicroseconds()`、`getAnalogValue()` 和 `getDigitalValue()` 访问数据。Java 门面也提供完整
 通道字段、采样率段、CFG 时间信息及其修改接口；读取值时的通道位置和采样位置均从 0 开始。
 
