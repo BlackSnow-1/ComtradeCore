@@ -1,7 +1,10 @@
 #include <gtest/gtest.h>
 #include <comtrade/comtrade.hpp>
+#include <cstddef>
 #include <fstream>
 #include <cstdio> // for std::remove
+#include <string>
+#include <vector>
 
 // Record 测试关注“整份数据驻留内存”的编辑与读写往返；流式行为由 test_stream.cpp 覆盖。
 class ComtradeRecordTest : public ::testing::Test {
@@ -116,4 +119,96 @@ TEST_F(ComtradeRecordTest, InMemoryManipulation) {
 
     EXPECT_EQ(verifier.getCfg().station_name, "Modified_Station");
     EXPECT_DOUBLE_EQ(verifier.getData().analog_values[0][0], 250.0);
+}
+
+class ComtradeBinaryRecordTest : public ComtradeRecordTest,
+                                 public ::testing::WithParamInterface<comtrade::DataType> {};
+
+TEST_P(ComtradeBinaryRecordTest, SavesAndParsesCompleteBinaryRecords) {
+    comtrade::Record writer;
+    writer.setStationAndDevice("Binary_Station", "Binary_Relay", comtrade::StandardVersion::V1999);
+
+    comtrade::AnalogChannel voltage;
+    voltage.index = 1;
+    voltage.id = "VA";
+    voltage.a = 0.25;
+    voltage.b = -10.0;
+    writer.addAnalogChannel(voltage);
+
+    comtrade::AnalogChannel current;
+    current.index = 2;
+    current.id = "IA";
+    current.a = 2.0;
+    current.b = 1.0;
+    writer.addAnalogChannel(current);
+
+    // 17 路数字量强制 DAT 使用两个状态字，覆盖跨 word 的通道顺序。
+    for (int index = 1; index <= 17; ++index) {
+        comtrade::DigitalChannel channel;
+        channel.index = index;
+        channel.id = "D" + std::to_string(index);
+        writer.addDigitalChannel(channel);
+    }
+
+    std::vector<bool> first_digitals(17, false);
+    first_digitals[0] = true;
+    first_digitals[15] = true;
+    first_digitals[16] = true;
+    std::vector<bool> second_digitals(17, true);
+    second_digitals[0] = false;
+    second_digitals[16] = false;
+
+    writer.addSample(125, {15.0, -5.0}, first_digitals);  // raw: 100, -3
+    writer.addSample(250, {-10.0, 9.0}, second_digitals); // raw: 0, 4
+    auto& cfg = writer.getMutableCfg();
+    cfg.data_type = GetParam();
+    cfg.time_multiplier = 0.25;
+    cfg.sample_rates = {{8000.0, 2}};
+
+    ASSERT_TRUE(writer.saveCfg(test_cfg));
+    ASSERT_TRUE(writer.saveDat(test_dat));
+
+    comtrade::Record reader;
+    ASSERT_TRUE(reader.parseCfg(test_cfg));
+    ASSERT_TRUE(reader.parseDat(test_dat));
+    EXPECT_EQ(reader.getCfg().data_type, GetParam());
+
+    const auto& data = reader.getData();
+    ASSERT_EQ(data.timestamp.size(), 2U);
+    EXPECT_EQ(data.timestamp[0], 125U);
+    EXPECT_EQ(data.timestamp[1], 250U);
+    ASSERT_EQ(data.analog_values.size(), 2U);
+    EXPECT_DOUBLE_EQ(data.analog_values[0][0], 15.0);
+    EXPECT_DOUBLE_EQ(data.analog_values[1][0], -5.0);
+    EXPECT_DOUBLE_EQ(data.analog_values[0][1], -10.0);
+    EXPECT_DOUBLE_EQ(data.analog_values[1][1], 9.0);
+    ASSERT_EQ(data.digital_values.size(), 17U);
+    for (std::size_t channel = 0; channel < data.digital_values.size(); ++channel) {
+        EXPECT_EQ(data.digital_values[channel][0], first_digitals[channel]) << channel;
+        EXPECT_EQ(data.digital_values[channel][1], second_digitals[channel]) << channel;
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    AllBinaryDatTypes,
+    ComtradeBinaryRecordTest,
+    ::testing::Values(comtrade::DataType::BINARY,
+                      comtrade::DataType::BINARY32,
+                      comtrade::DataType::FLOAT32),
+    [](const ::testing::TestParamInfo<comtrade::DataType>& info) {
+        return comtrade::DataTypeUtils::ToString(info.param);
+    });
+
+TEST_F(ComtradeRecordTest, SaveDatRejectsIncompleteChannelColumns) {
+    comtrade::Record record;
+    record.setStationAndDevice("Shape_Test", "Relay");
+    comtrade::AnalogChannel channel;
+    channel.index = 1;
+    channel.id = "A1";
+    record.addAnalogChannel(channel);
+    record.addSample(0, {1.0}, {});
+    record.addSample(1, {2.0}, {});
+    record.getMutableData().analog_values[0].pop_back();
+
+    EXPECT_FALSE(record.saveDat(test_dat));
 }
