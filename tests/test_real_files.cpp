@@ -16,6 +16,8 @@ namespace {
 namespace fs = std::filesystem;
 
 constexpr auto kFixtureStem = "SIMENS/20191024045947";
+constexpr auto kBinaryFixtureStem =
+    "testfile/PQ06II6223#PQ06II6223_DR_9_20200701_102313_521";
 
 struct AsciiFixture {
     const char* test_name;
@@ -44,6 +46,10 @@ fs::path dataPath(const char* relative_path) {
 
 fs::path fixturePath(const char* extension) {
     return fs::path(COMTRADE_TEST_DATA_DIR) / (std::string(kFixtureStem) + extension);
+}
+
+fs::path binaryFixturePath(const char* extension) {
+    return fs::path(COMTRADE_TEST_DATA_DIR) / (std::string(kBinaryFixtureStem) + extension);
 }
 
 bool isGitLfsPointer(const fs::path& path) {
@@ -219,6 +225,51 @@ TEST(ComtradeRealFileAccuracy, SiemensAsciiRecordingMatchesReferenceValues) {
     EXPECT_NEAR(last_row.analog_values[0], 0.52142214432, 1e-12);
     EXPECT_NEAR(last_row.analog_values[11], -117.137702218, 1e-9);
     EXPECT_TRUE(last_row.digital_values[25]);
+}
+
+TEST(ComtradeRealFileAccuracy, BinaryRecordingMatchesReferenceValues) {
+    const auto cfg_path = binaryFixturePath(".cfg");
+    const auto dat_path = binaryFixturePath(".dat");
+    ASSERT_TRUE(fs::exists(cfg_path)) << cfg_path;
+    ASSERT_TRUE(fs::exists(dat_path)) << dat_path;
+    if (isGitLfsPointer(cfg_path) || isGitLfsPointer(dat_path)) {
+        GTEST_SKIP() << "Real COMTRADE fixture is a Git LFS pointer; run git lfs pull first.";
+    }
+
+    const comtrade::StreamReader reader(cfg_path.string());
+    const auto& cfg = reader.getCfg();
+    ASSERT_EQ(cfg.data_type, comtrade::DataType::BINARY);
+    ASSERT_EQ(cfg.analog_count, 12);
+    ASSERT_EQ(cfg.digital_count, 26);
+    ASSERT_EQ(cfg.sample_rates.size(), 1U);
+    EXPECT_EQ(cfg.sample_rates[0].end_sample, 333U);
+
+    comtrade::SampleRow first_row;
+    comtrade::SampleRow last_row;
+    std::size_t row_count = 0;
+    const auto processed = reader.processDatStream(dat_path.string(), [&](const comtrade::SampleRow& row) {
+        EXPECT_EQ(row.index, row_count + 1U);
+        if (row_count == 0U) first_row = row;
+        last_row = row;
+        ++row_count;
+    });
+
+    ASSERT_EQ(processed, 333U);
+    ASSERT_EQ(row_count, 333U);
+    EXPECT_EQ(first_row.index, 1U);
+    EXPECT_EQ(first_row.raw_timestamp, 0U);
+    EXPECT_NEAR(first_row.analog_values[0], -2.8875, 1e-12);       // raw -231
+    EXPECT_NEAR(first_row.analog_values[4], -69.01961088, 1e-10); // raw -1408
+    EXPECT_NEAR(first_row.analog_values[11], 144.85294755, 1e-10);// raw 2955
+    EXPECT_TRUE(first_row.digital_values[9]);
+    EXPECT_TRUE(first_row.digital_values[15]);
+    EXPECT_TRUE(first_row.digital_values[21]);
+
+    EXPECT_EQ(last_row.index, 333U);
+    EXPECT_EQ(last_row.raw_timestamp, 415000U);
+    EXPECT_NEAR(last_row.analog_values[4], -39.80392332, 1e-10); // raw -812
+    EXPECT_NEAR(last_row.analog_values[11], -3.9215688, 1e-10); // raw -80
+    EXPECT_TRUE(last_row.digital_values[22]);
 }
 
 }  // namespace
