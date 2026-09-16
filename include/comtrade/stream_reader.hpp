@@ -6,6 +6,7 @@
 
 #include "binary_io.hpp"
 #include "cfg_io.hpp"
+#include "text_encoding.hpp"
 #include "types.hpp"
 #include "utils.hpp"
 
@@ -95,7 +96,12 @@ private:
                            const std::function<void(const SampleRow&)>& on_row_parsed) const {
         size_t parsed_count = 0;
         std::string line;
+        bool first_line = true;
         while (std::getline(dat_file, line)) {
+            if (first_line) {
+                detail::stripUtf8Bom(line);
+                first_line = false;
+            }
             const auto tokens = utils::split(line);
             const auto expected_tokens = static_cast<std::size_t>(2 + cfg_.analog_count + cfg_.digital_count);
             if (tokens.size() < expected_tokens) continue;
