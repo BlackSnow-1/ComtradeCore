@@ -8,8 +8,9 @@
 #include "types.hpp"
 #include "utils.hpp"
 #include "cfg_io.hpp"
+#include "binary_io.hpp"
+#include "stream_writer.hpp"
 #include <fstream>
-#include <iostream>
 #include <cmath>
 #include <iomanip>
 #include <limits>
@@ -45,41 +46,23 @@ namespace comtrade {
 
         inline bool parseDat(const std::string &dat_filepath) {
             // DAT 的列结构取决于已加载的 CFG，因此调用方应先成功执行 parseCfg。
-            if (cfg_.data_type != DataType::ASCII) {
-                std::cerr << "[COMTRADE] Currently only ASCII is supported for parsing.\n";
+            if (!std::isfinite(cfg_.time_multiplier) || cfg_.time_multiplier <= 0.0 ||
+                cfg_.analog_count < 0 || cfg_.digital_count < 0 ||
+                cfg_.analog_channels.size() != static_cast<std::size_t>(cfg_.analog_count) ||
+                cfg_.digital_channels.size() != static_cast<std::size_t>(cfg_.digital_count)) {
                 return false;
             }
 
-            std::ifstream file(dat_filepath);
+            std::ifstream file(dat_filepath, std::ios::binary);
             if (!file.is_open()) return false;
 
             data_ = RecordData{}; // 清空旧数据
             data_.analog_values.resize(cfg_.analog_count);
             data_.digital_values.resize(cfg_.digital_count);
 
-            std::string line;
-            while (std::getline(file, line)) {
-                auto tokens = utils::split(line);
-                if (tokens.size() < static_cast<size_t>(2) + cfg_.analog_count + cfg_.digital_count) continue;
-
-                // TIMEMULT 的单位是“微秒/原始时间单位”。内存中统一保存微秒偏移。
-                const auto raw_timestamp = std::stoul(tokens[1]);
-                const auto timestamp_us = std::llround(raw_timestamp * cfg_.time_multiplier);
-                if (timestamp_us < 0 || timestamp_us > std::numeric_limits<uint32_t>::max()) continue;
-                data_.timestamp.push_back(static_cast<uint32_t>(timestamp_us));
-
-                for (int i = 0; i < cfg_.analog_count; ++i) {
-                    double raw_val = std::stod(tokens[2 + i]);
-                    double real_val = raw_val * cfg_.analog_channels[i].a + cfg_.analog_channels[i].b;
-                    data_.analog_values[i].push_back(real_val);
-                }
-
-                for (int i = 0; i < cfg_.digital_count; ++i) {
-                    const auto token_index = static_cast<std::size_t>(2 + cfg_.analog_count + i);
-                    data_.digital_values[i].push_back(std::stoul(tokens[token_index]) != 0);
-                }
-            }
-            return true;
+            if (cfg_.data_type == DataType::ASCII) return parseAsciiDat(file);
+            if (detail::isBinaryDataType(cfg_.data_type)) return parseBinaryDat(file);
+            return false;
         }
 
         // ==========================================
@@ -145,32 +128,40 @@ namespace comtrade {
         }
 
         [[nodiscard]] inline bool saveDat(const std::string &filepath) const {
-            if (cfg_.data_type != DataType::ASCII) return false;
             if (!std::isfinite(cfg_.time_multiplier) || cfg_.time_multiplier <= 0.0) return false;
 
-            std::ofstream out(filepath, std::ios::binary);
-            if (!out.is_open()) return false;
+            const auto num_samples = data_.timestamp.size();
+            if (cfg_.analog_channels.size() != static_cast<std::size_t>(cfg_.analog_count) ||
+                cfg_.digital_channels.size() != static_cast<std::size_t>(cfg_.digital_count) ||
+                data_.analog_values.size() != cfg_.analog_channels.size() ||
+                data_.digital_values.size() != cfg_.digital_channels.size()) {
+                return false;
+            }
+            for (const auto& values : data_.analog_values) {
+                if (values.size() != num_samples) return false;
+            }
+            for (const auto& values : data_.digital_values) {
+                if (values.size() != num_samples) return false;
+            }
 
-            size_t num_samples = data_.timestamp.size();
-            for (size_t i = 0; i < num_samples; ++i) {
-                // DAT 落盘规则与读取互逆：raw = round(timestamp_us / TIMEMULT)。
-                const auto raw_timestamp = std::llround(data_.timestamp[i] / cfg_.time_multiplier);
-                if (raw_timestamp < 0 || raw_timestamp > std::numeric_limits<uint32_t>::max()) return false;
-                out << (i + 1) << "," << raw_timestamp;
+            try {
+                StreamWriter writer(cfg_);
+                if (!writer.open(filepath)) return false;
 
-                for (size_t j = 0; j < static_cast<size_t>(cfg_.analog_count); ++j) {
-                    double real_val = data_.analog_values[j][i];
-                    double a = cfg_.analog_channels[j].a;
-                    double b = cfg_.analog_channels[j].b;
-
-                    int raw_val = (a != 0.0) ? static_cast<int>(std::round((real_val - b) / a)) : 0;
-                    out << "," << raw_val;
+                std::vector<double> analog_row(cfg_.analog_channels.size());
+                std::vector<bool> digital_row(cfg_.digital_channels.size());
+                for (std::size_t sample = 0; sample < num_samples; ++sample) {
+                    for (std::size_t channel = 0; channel < analog_row.size(); ++channel) {
+                        analog_row[channel] = data_.analog_values[channel][sample];
+                    }
+                    for (std::size_t channel = 0; channel < digital_row.size(); ++channel) {
+                        digital_row[channel] = data_.digital_values[channel][sample];
+                    }
+                    writer.pushRow(data_.timestamp[sample], analog_row, digital_row);
                 }
-
-                for (size_t j = 0; j < static_cast<size_t>(cfg_.digital_count); ++j) {
-                    out << "," << (data_.digital_values[j][i] ? 1 : 0);
-                }
-                out << "\r\n";
+                writer.close();
+            } catch (const std::exception&) {
+                return false;
             }
             return true;
         }
@@ -240,6 +231,100 @@ namespace comtrade {
         }
 
     private:
+        bool appendDecodedSample(const std::uint64_t raw_timestamp,
+                                 const std::vector<double>& analog_values,
+                                 const std::vector<bool>& digital_values) {
+            // RecordData 延续公开 API：保存按 TIMEMULT 换算后的 uint32 微秒偏移。
+            const long double timestamp_us = static_cast<long double>(raw_timestamp) *
+                                             static_cast<long double>(cfg_.time_multiplier);
+            if (!std::isfinite(timestamp_us) || timestamp_us < 0.0L ||
+                timestamp_us > static_cast<long double>(std::numeric_limits<std::uint32_t>::max())) {
+                return false;
+            }
+
+            data_.timestamp.push_back(static_cast<std::uint32_t>(std::llround(timestamp_us)));
+            for (std::size_t channel = 0; channel < analog_values.size(); ++channel) {
+                data_.analog_values[channel].push_back(analog_values[channel]);
+            }
+            for (std::size_t channel = 0; channel < digital_values.size(); ++channel) {
+                data_.digital_values[channel].push_back(digital_values[channel]);
+            }
+            return true;
+        }
+
+        bool parseAsciiDat(std::istream& file) {
+            const auto analog_count = static_cast<std::size_t>(cfg_.analog_count);
+            const auto digital_count = static_cast<std::size_t>(cfg_.digital_count);
+            std::vector<double> analog_values(analog_count);
+            std::vector<bool> digital_values(digital_count);
+
+            std::string line;
+            while (std::getline(file, line)) {
+                const auto tokens = utils::split(line);
+                if (tokens.size() < 2U + analog_count + digital_count) continue;
+
+                try {
+                    const auto raw_timestamp = std::stoull(tokens[1]);
+                    for (std::size_t channel = 0; channel < analog_count; ++channel) {
+                        const auto raw_value = std::stod(tokens[2U + channel]);
+                        const auto& definition = cfg_.analog_channels[channel];
+                        analog_values[channel] = raw_value * definition.a + definition.b;
+                    }
+                    for (std::size_t channel = 0; channel < digital_count; ++channel) {
+                        digital_values[channel] =
+                            std::stoul(tokens[2U + analog_count + channel]) != 0U;
+                    }
+                    appendDecodedSample(raw_timestamp, analog_values, digital_values);
+                } catch (const std::exception&) {
+                    // 与流式读取一致：坏行不影响后续完整采样点。
+                    continue;
+                }
+            }
+            return true;
+        }
+
+        bool parseBinaryDat(std::istream& file) {
+            const auto analog_count = static_cast<std::size_t>(cfg_.analog_count);
+            const auto digital_count = static_cast<std::size_t>(cfg_.digital_count);
+            const auto row_size = detail::binaryRowSize(cfg_.data_type, analog_count, digital_count);
+            std::vector<char> encoded_row(row_size);
+            std::vector<double> analog_values(analog_count);
+            std::vector<bool> digital_values(digital_count);
+
+            while (file.read(encoded_row.data(), static_cast<std::streamsize>(encoded_row.size()))) {
+                const char* cursor = encoded_row.data();
+                static_cast<void>(detail::readUint32LittleEndian(cursor)); // sample number
+                const auto raw_timestamp = detail::readUint32LittleEndian(cursor);
+
+                for (std::size_t channel = 0; channel < analog_count; ++channel) {
+                    double raw_value = 0.0;
+                    if (cfg_.data_type == DataType::BINARY) {
+                        raw_value = detail::readInt16LittleEndian(cursor);
+                    } else if (cfg_.data_type == DataType::BINARY32) {
+                        raw_value = detail::readInt32LittleEndian(cursor);
+                    } else {
+                        raw_value = detail::readFloat32LittleEndian(cursor);
+                    }
+                    const auto& definition = cfg_.analog_channels[channel];
+                    analog_values[channel] = raw_value * definition.a + definition.b;
+                }
+
+                for (std::size_t word_index = 0;
+                     word_index < detail::digitalWordCount(digital_count);
+                     ++word_index) {
+                    const auto word = detail::readUint16LittleEndian(cursor);
+                    for (std::size_t bit = 0; bit < 16U; ++bit) {
+                        const auto channel = word_index * 16U + bit;
+                        if (channel >= digital_count) break;
+                        digital_values[channel] = (word & (std::uint16_t{1} << bit)) != 0U;
+                    }
+                }
+
+                appendDecodedSample(raw_timestamp, analog_values, digital_values);
+            }
+            return true;
+        }
+
         CfgData cfg_;
         RecordData data_;
     };
