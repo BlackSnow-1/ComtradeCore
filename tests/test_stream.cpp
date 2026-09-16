@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
-#include <cstring>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -13,6 +12,7 @@
 #include <vector>
 
 #include "comtrade/record.hpp"
+#include "comtrade/binary_io.hpp"
 #include "comtrade/stream_reader.hpp"
 #include "comtrade/stream_writer.hpp"
 #include "comtrade/types.hpp"
@@ -85,13 +85,30 @@ namespace {
 
         template<typename T>
         static T readValue(const std::vector<char> &bytes, std::size_t offset) {
-            // memcpy 读取避免测试代码本身因未对齐 reinterpret_cast 产生未定义行为。
-            T value{};
+            // 测试也显式按小端读取，避免在大端主机上把正确文件误判为失败。
             EXPECT_LE(offset + sizeof(T), bytes.size());
-            if (offset + sizeof(T) <= bytes.size()) {
-                std::memcpy(&value, bytes.data() + offset, sizeof(T));
+            if (offset + sizeof(T) > bytes.size()) return T{};
+
+            const char* cursor = bytes.data() + offset;
+            if constexpr (std::is_same_v<T, std::uint16_t>) {
+                return comtrade::detail::readUint16LittleEndian(cursor);
+            } else if constexpr (std::is_same_v<T, std::int16_t>) {
+                return comtrade::detail::readInt16LittleEndian(cursor);
+            } else if constexpr (std::is_same_v<T, std::uint32_t>) {
+                return comtrade::detail::readUint32LittleEndian(cursor);
+            } else if constexpr (std::is_same_v<T, std::int32_t>) {
+                return comtrade::detail::readInt32LittleEndian(cursor);
+            } else if constexpr (std::is_same_v<T, float>) {
+                return comtrade::detail::readFloat32LittleEndian(cursor);
+            } else {
+                static_assert(!sizeof(T), "Unsupported binary test value type");
             }
-            return value;
+        }
+
+        static void saveCfg(const fs::path& path, const comtrade::CfgData& cfg) {
+            comtrade::Record record;
+            record.getMutableCfg() = cfg;
+            ASSERT_TRUE(record.saveCfg(path.string()));
         }
 
         fs::path test_directory_;
@@ -190,6 +207,109 @@ namespace {
         EXPECT_EQ(readValue<std::uint32_t>(bytes, 0), 1U);
         EXPECT_EQ(readValue<std::uint32_t>(bytes, 4), 250000U);
         EXPECT_FLOAT_EQ(readValue<float>(bytes, 8), 5.0F);
+    }
+
+    class BinaryStreamEngineTest : public StreamEngineTest,
+                                   public ::testing::WithParamInterface<comtrade::DataType> {};
+
+    TEST_P(BinaryStreamEngineTest, RoundTripsScaledAnalogsPackedDigitalsAndTimeMultiplier) {
+        auto cfg = makeCfg(GetParam(), 2, 17);
+        cfg.station_name = "BINARY_TEST";
+        cfg.rec_dev_id = "RELAY";
+        cfg.version = comtrade::StandardVersion::V1999;
+        cfg.time_multiplier = 0.25;
+        cfg.sample_rates = {{4000.0, 2}};
+        cfg.analog_channels[0].a = 0.5;
+        cfg.analog_channels[0].b = -2.0;
+        cfg.analog_channels[1].a = 2.0;
+        cfg.analog_channels[1].b = 1.0;
+        saveCfg(cfg_path_, cfg);
+
+        std::vector<bool> first_digitals(17, false);
+        first_digitals[0] = true;
+        first_digitals[3] = true;
+        first_digitals[15] = true;
+        first_digitals[16] = true;
+        std::vector<bool> second_digitals(17, true);
+        second_digitals[1] = false;
+        second_digitals[16] = false;
+
+        comtrade::StreamWriter writer(cfg);
+        ASSERT_TRUE(writer.open(dat_path_.string()));
+        writer.pushRow(250, {3.0, -5.0}, first_digitals);   // raw analogs: 10, -3
+        writer.pushRow(500, {-12.0, 9.0}, second_digitals); // raw analogs: -20, 4
+        writer.close();
+
+        const comtrade::StreamReader reader(cfg_path_.string());
+        std::vector<comtrade::SampleRow> rows;
+        ASSERT_EQ(reader.processDatStream(
+                      dat_path_.string(), [&](const auto& row) { rows.push_back(row); }),
+                  2U);
+        ASSERT_EQ(rows.size(), 2U);
+
+        EXPECT_EQ(rows[0].index, 1U);
+        EXPECT_EQ(rows[0].raw_timestamp, 1000U);
+        EXPECT_EQ(rows[0].timestamp_us, 250U);
+        EXPECT_EQ(rows[0].time_offset, std::chrono::microseconds(250));
+        EXPECT_DOUBLE_EQ(rows[0].analog_values[0], 3.0);
+        EXPECT_DOUBLE_EQ(rows[0].analog_values[1], -5.0);
+        EXPECT_EQ(rows[0].digital_values, first_digitals);
+
+        EXPECT_EQ(rows[1].index, 2U);
+        EXPECT_EQ(rows[1].raw_timestamp, 2000U);
+        EXPECT_EQ(rows[1].timestamp_us, 500U);
+        EXPECT_DOUBLE_EQ(rows[1].analog_values[0], -12.0);
+        EXPECT_DOUBLE_EQ(rows[1].analog_values[1], 9.0);
+        EXPECT_EQ(rows[1].digital_values, second_digitals);
+    }
+
+    INSTANTIATE_TEST_SUITE_P(
+        AllBinaryDatTypes,
+        BinaryStreamEngineTest,
+        ::testing::Values(comtrade::DataType::BINARY,
+                          comtrade::DataType::BINARY32,
+                          comtrade::DataType::FLOAT32),
+        [](const ::testing::TestParamInfo<comtrade::DataType>& info) {
+            return comtrade::DataTypeUtils::ToString(info.param);
+        });
+
+    TEST_F(StreamEngineTest, BinaryReaderIgnoresAnIncompleteFinalRow) {
+        auto cfg = makeCfg(comtrade::DataType::BINARY32, 1, 1);
+        cfg.station_name = "TRUNCATED_BINARY";
+        cfg.rec_dev_id = "RELAY";
+        cfg.version = comtrade::StandardVersion::V1999;
+        cfg.sample_rates = {{1000.0, 2}};
+        saveCfg(cfg_path_, cfg);
+
+        comtrade::StreamWriter writer(cfg);
+        ASSERT_TRUE(writer.open(dat_path_.string()));
+        writer.pushRow(0, {10.0}, {false});
+        writer.pushRow(1000, {20.0}, {true});
+        writer.close();
+
+        const auto complete_size = fs::file_size(dat_path_);
+        ASSERT_GT(complete_size, 1U);
+        fs::resize_file(dat_path_, complete_size - 1U);
+
+        const comtrade::StreamReader reader(cfg_path_.string());
+        std::vector<comtrade::SampleRow> rows;
+        EXPECT_EQ(reader.processDatStream(
+                      dat_path_.string(), [&](const auto& row) { rows.push_back(row); }),
+                  1U);
+        ASSERT_EQ(rows.size(), 1U);
+        EXPECT_EQ(rows[0].index, 1U);
+        EXPECT_DOUBLE_EQ(rows[0].analog_values[0], 10.0);
+        EXPECT_FALSE(rows[0].digital_values[0]);
+    }
+
+    TEST_F(StreamEngineTest, WriterRejectsMismatchedChannelsAndOutOfRangeBinaryValues) {
+        auto cfg = makeCfg(comtrade::DataType::BINARY, 1, 1);
+        comtrade::StreamWriter writer(cfg);
+        ASSERT_TRUE(writer.open(dat_path_.string()));
+
+        EXPECT_THROW(writer.pushRow(0, {}, {false}), std::invalid_argument);
+        EXPECT_THROW(writer.pushRow(0, {1.0}, {}), std::invalid_argument);
+        EXPECT_THROW(writer.pushRow(0, {40000.0}, {false}), std::overflow_error);
     }
 
     TEST_F(StreamEngineTest, ReaderReturnsZeroWhenTheDatFileCannotBeOpened) {
