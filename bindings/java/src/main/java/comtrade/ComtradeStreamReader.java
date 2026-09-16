@@ -2,7 +2,11 @@ package comtrade;
 
 import java.util.Objects;
 
-/** Constant-memory callback facade for {@code comtrade::StreamReader}. */
+/**
+ * Constant-memory callback facade for {@code comtrade::StreamReader}.
+ * The CFG selects ASCII, BINARY, BINARY32, or FLOAT32 decoding automatically;
+ * UTF-8 BOMs at the start of CFG and ASCII DAT files are removed automatically.
+ */
 public final class ComtradeStreamReader implements AutoCloseable {
     @FunctionalInterface
     public interface RowHandler {
@@ -40,7 +44,12 @@ public final class ComtradeStreamReader implements AutoCloseable {
         nativeReader = new ComtradeNativeStreamReader(Objects.requireNonNull(cfgPath, "cfgPath"));
     }
 
-    /** Processes valid ASCII, BINARY, BINARY32, or FLOAT32 rows synchronously. */
+    /**
+     * Processes valid ASCII, BINARY, BINARY32, or FLOAT32 rows synchronously.
+     * Callback analog values have already been scaled with the CFG coefficients,
+     * and packed binary digital words have been expanded to booleans. The callback
+     * and its arrays are safe Java copies and may be retained after it returns.
+     */
     public long processDatStream(String datPath, RowHandler rowHandler) {
         Objects.requireNonNull(datPath, "datPath");
         final RowHandler handler = Objects.requireNonNull(rowHandler, "rowHandler");
