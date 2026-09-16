@@ -18,16 +18,16 @@ ComtradeCore 是一个轻量、Header-only 的 C++17 COMTRADE 库，用于构造
 
 ## 功能概览
 
-- 使用 `Record` 在内存中构造记录并生成 CFG、DAT 文件。
+- 使用 `Record` 在内存中读取、编辑和生成 CFG、DAT 文件。
 - 使用 `StreamWriter` 写入 ASCII、BINARY、BINARY32 和 FLOAT32 DAT 数据。
-- 使用 `StreamReader` 逐采样读取 ASCII DAT，避免一次性加载完整文件。
+- 使用 `StreamReader` 逐采样读取 ASCII、BINARY、BINARY32 和 FLOAT32 DAT，避免一次性加载完整文件。
 - 自动识别 UTF-8 CFG，并将 GB2312、GBK、GB18030 CFG 的中文元数据统一转换为 UTF-8。
 - 生成的 CFG 和 ASCII DAT 在所有平台统一使用 COMTRADE CRLF 行结束符。
 - 支持 IEEE C37.111 的 1991、1999 和 2013 版本标识。
 - 提供可安装的 CMake package，安装后可通过 `find_package()` 使用。
 
-> 当前 `StreamReader` 和 `Record::parseDat()` 只支持读取 ASCII DAT；BINARY、BINARY32、FLOAT32
-> 的流式读取尚未实现。
+二进制 DAT 按 COMTRADE 小端布局处理：`BINARY` 使用 16 位有符号模拟量，`BINARY32` 使用 32 位
+有符号模拟量，`FLOAT32` 使用 IEEE 754 单精度模拟量；数字量均按每 16 路一个状态字打包。
 
 IEEE/IEC C37.111-2013 CFG 支持采样率段、时间倍率、小数秒精度、时间码、本地时区偏移、
 时间质量码和闰秒指示；当 `nrates=0` 时，可读取并保持后续0到任意数量的采样率段。
@@ -592,8 +592,8 @@ mvn org.apache.maven.plugins:maven-deploy-plugin:3.1.4:deploy-file \
 
 ### Java 流式读取示例
 
-流式读取会同步逐采样执行回调，不会将整份 DAT 文件加载到内存中，适合处理大文件。当前流式读取仅
-支持 ASCII DAT；BINARY、BINARY32 和 FLOAT32 暂时只能流式写入。
+流式读取会同步逐采样执行回调，不会将整份 DAT 文件加载到内存中，适合处理大文件。读取器会根据
+CFG 的 DAT 类型自动处理 ASCII、BINARY、BINARY32 或 FLOAT32，不需要调用不同的方法。
 
 ```java
 package org.example;
@@ -637,8 +637,8 @@ public final class Main {
 --enable-native-access=ALL-UNNAMED -Djava.library.path=/home/wangguangbo/ComtradeCore/install/lib/comtrade/java
 ```
 
-如果 `reader.getDataType()` 输出的不是 `ASCII`，当前版本不能流式读取该 DAT，可改用普通读取接口，
-或者先将文件转换为 ASCII COMTRADE。
+`reader.getDataType()` 可用于记录或校验实际编码；四种 DAT 类型使用相同的回调数据结构，回调中的
+模拟量已经应用 CFG 的 `a`、`b` 系数，数字量已经从二进制状态字展开。
 
 ## 生成 COMTRADE 文件
 
@@ -691,7 +691,8 @@ record.dat
 ## 流式读取
 
 `StreamReader` 在构造时必须接收 CFG 路径。CFG 不存在或解析失败时，构造函数会抛出
-`std::runtime_error`。
+`std::runtime_error`。它会读取 CFG 中声明的 DAT 类型，并自动选择 ASCII、BINARY、BINARY32 或
+FLOAT32 解码路径。
 
 ```cpp
 #include <comtrade/stream_reader.hpp>
