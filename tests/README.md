@@ -4,7 +4,8 @@
 
 ### 准确性测试
 
-`test_real_files.cpp` 参数化覆盖当前测试数据中的全部 6 组 ASCII 录波：
+`test_real_files.cpp` 参数化覆盖当前测试数据中的全部 6 组 ASCII 录波，并额外验证一组真实 BINARY
+录波：
 
 ```text
 ComtradeFiles/cometrade/000002.CFG + 000002.DAT                  (GB2312)
@@ -13,10 +14,10 @@ ComtradeFiles/cometrade/000004.CFG + 000004.DAT                  (GB2312)
 ComtradeFiles/SIMENS/20191024045947.CFG + 20191024045947.DAT      (GB2312)
 ComtradeFiles/Transient/*_ID_1_*_TRIP.cfg + 对应 DAT              (UTF-8)
 ComtradeFiles/Transient/*_ID_2_*_TRIP.cfg + 对应 DAT              (UTF-8)
+ComtradeFiles/testfile/PQ06II6223#*DR_9_20200701_102313_521.*     (BINARY)
 ```
 
-`FaultData` 和 `testfile` 中当前没有声明为 ASCII 的 CFG，因此不会交给仅支持 ASCII 的
-`StreamReader`。参数化测试验证：
+ASCII 参数化测试验证：
 
 - CFG 能否加载，数据类型是否为 ASCII；
 - GB2312 和 UTF-8 CFG 是否都能完成结构及数值解析；
@@ -33,6 +34,10 @@ ComtradeFiles/Transient/*_ID_2_*_TRIP.cfg + 对应 DAT              (UTF-8)
 - 所有数字通道的置位次数；
 - 首尾采样的时间戳和代表性通道值。
 
+BINARY 基线包含 12 路 16 位模拟量、26 路数字量和 333 个采样点，验证固定长度行、小端整数、跨两个
+状态字的数字通道以及首尾工程量。`test_stream.cpp` 和 `test_record.cpp` 另外使用合成数据逐一覆盖
+`BINARY`、`BINARY32`、`FLOAT32` 的流式与完整记录往返。
+
 CFG 的结构字段、数字和分隔符都是 ASCII 子集。解析器会先验证整份 CFG 是否为合法 UTF-8；
 若不是，则按 GB18030 解码（兼容 GB2312 和 GBK），将站名、设备名和通道信息统一转换为 UTF-8。
 Linux 使用系统 `iconv`，Windows 使用系统代码页 54936；其他平台若无法提供转换能力，则保留原始字节，
@@ -44,7 +49,7 @@ Linux 使用系统 `iconv`，Windows 使用系统代码页 54936；其他平台�
 
 ```bash
 git lfs pull \
-  --include="tests/ComtradeFiles/cometrade/*.CFG,tests/ComtradeFiles/cometrade/*.DAT,tests/ComtradeFiles/SIMENS/20191024045947.CFG,tests/ComtradeFiles/SIMENS/20191024045947.DAT,tests/ComtradeFiles/Transient/*.cfg,tests/ComtradeFiles/Transient/*.dat"
+  --include="tests/ComtradeFiles/cometrade/*.CFG,tests/ComtradeFiles/cometrade/*.DAT,tests/ComtradeFiles/SIMENS/20191024045947.CFG,tests/ComtradeFiles/SIMENS/20191024045947.DAT,tests/ComtradeFiles/Transient/*.cfg,tests/ComtradeFiles/Transient/*.dat,tests/ComtradeFiles/testfile/PQ06II6223#PQ06II6223_DR_9_20200701_102313_521.cfg,tests/ComtradeFiles/testfile/PQ06II6223#PQ06II6223_DR_9_20200701_102313_521.dat"
 ```
 
 运行准确性测试：
@@ -81,7 +86,7 @@ cmake --build build-benchmark --config Release \
 ./build-benchmark/benchmarks/comtrade_stream_benchmark
 ```
 
-也可以指定其他 ASCII 文件和循环次数：
+也可以指定其他受支持的 DAT 文件和循环次数：
 
 ```bash
 ./build-benchmark/benchmarks/comtrade_stream_benchmark \
