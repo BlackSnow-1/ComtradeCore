@@ -25,7 +25,7 @@ namespace comtrade {
         UNKNOWN = 0
     };
 
-    // DAT 的物理编码。当前 Record/StreamReader 只解析 ASCII，StreamWriter 可写全部类型。
+    // DAT 的物理编码；Record 和流式接口均支持下列四种类型的读写。
     enum class DataType {
         ASCII,
         BINARY,
