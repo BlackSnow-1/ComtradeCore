@@ -22,6 +22,18 @@
 
 namespace comtrade::detail {
 
+// UTF-8 BOM 只允许出现在文本文件开头；返回值便于调用方记录是否发生过处理。
+inline bool stripUtf8Bom(std::string& text) noexcept {
+    if (text.size() < 3U ||
+        static_cast<std::uint8_t>(text[0]) != 0xEFU ||
+        static_cast<std::uint8_t>(text[1]) != 0xBBU ||
+        static_cast<std::uint8_t>(text[2]) != 0xBFU) {
+        return false;
+    }
+    text.erase(0, 3);
+    return true;
+}
+
 // 严格校验 UTF-8，拒绝截断序列、过长编码、代理项和超出 Unicode 范围的码点。
 inline bool isValidUtf8(const std::string& text) noexcept {
     std::size_t cursor = 0;
@@ -130,12 +142,7 @@ inline bool gb18030ToUtf8(const std::string& input, std::string& output) {
 // 转换采用“全有或全无”：任意一行无法按 GB18030 解码时保留整份原始内容，
 // 避免同一份 CFG 中一部分转换、一部分未转换。合法 UTF-8 始终优先。
 inline void normalizeCfgLinesToUtf8(std::vector<std::string>& lines) {
-    if (!lines.empty() && lines.front().size() >= 3 &&
-        static_cast<std::uint8_t>(lines.front()[0]) == 0xEFU &&
-        static_cast<std::uint8_t>(lines.front()[1]) == 0xBBU &&
-        static_cast<std::uint8_t>(lines.front()[2]) == 0xBFU) {
-        lines.front().erase(0, 3);
-    }
+    if (!lines.empty()) stripUtf8Bom(lines.front());
 
     bool utf8 = true;
     for (const auto& line : lines) {
