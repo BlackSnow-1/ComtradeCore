@@ -10,6 +10,7 @@
 #include "cfg_io.hpp"
 #include "binary_io.hpp"
 #include "stream_writer.hpp"
+#include "text_encoding.hpp"
 #include <fstream>
 #include <cmath>
 #include <iomanip>
@@ -259,7 +260,12 @@ namespace comtrade {
             std::vector<bool> digital_values(digital_count);
 
             std::string line;
+            bool first_line = true;
             while (std::getline(file, line)) {
+                if (first_line) {
+                    detail::stripUtf8Bom(line);
+                    first_line = false;
+                }
                 const auto tokens = utils::split(line);
                 if (tokens.size() < 2U + analog_count + digital_count) continue;
 
