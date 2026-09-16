@@ -121,6 +121,39 @@ TEST_F(ComtradeRecordTest, InMemoryManipulation) {
     EXPECT_DOUBLE_EQ(verifier.getData().analog_values[0][0], 250.0);
 }
 
+TEST_F(ComtradeRecordTest, ParsesAsciiDatWithUtf8BomWithoutLosingFirstSample) {
+    comtrade::Record cfg_writer;
+    cfg_writer.setStationAndDevice("UTF8_BOM_DAT", "Relay", comtrade::StandardVersion::V1999);
+    comtrade::AnalogChannel channel;
+    channel.index = 1;
+    channel.id = "A1";
+    channel.a = 0.25;
+    channel.b = -2.0;
+    cfg_writer.addAnalogChannel(channel);
+    cfg_writer.getMutableCfg().sample_rates = {{2000.0, 2}};
+    ASSERT_TRUE(cfg_writer.saveCfg(test_cfg));
+
+    {
+        std::ofstream dat_file(test_dat, std::ios::binary);
+        ASSERT_TRUE(dat_file.is_open());
+        dat_file << "\xEF\xBB\xBF"
+                 << "1,0,20\r\n"
+                 << "2,500,-8\r\n";
+    }
+
+    comtrade::Record reader;
+    ASSERT_TRUE(reader.parseCfg(test_cfg));
+    ASSERT_TRUE(reader.parseDat(test_dat));
+    const auto& data = reader.getData();
+    ASSERT_EQ(data.timestamp.size(), 2U);
+    EXPECT_EQ(data.timestamp[0], 0U);
+    EXPECT_EQ(data.timestamp[1], 500U);
+    ASSERT_EQ(data.analog_values.size(), 1U);
+    ASSERT_EQ(data.analog_values[0].size(), 2U);
+    EXPECT_DOUBLE_EQ(data.analog_values[0][0], 3.0);
+    EXPECT_DOUBLE_EQ(data.analog_values[0][1], -4.0);
+}
+
 class ComtradeBinaryRecordTest : public ComtradeRecordTest,
                                  public ::testing::WithParamInterface<comtrade::DataType> {};
 
