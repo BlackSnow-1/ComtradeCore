@@ -40,7 +40,7 @@ public final class ComtradeStreamReader implements AutoCloseable {
         nativeReader = new ComtradeNativeStreamReader(Objects.requireNonNull(cfgPath, "cfgPath"));
     }
 
-    /** Processes valid ASCII rows synchronously and returns their count. */
+    /** Processes valid ASCII, BINARY, BINARY32, or FLOAT32 rows synchronously. */
     public long processDatStream(String datPath, RowHandler rowHandler) {
         Objects.requireNonNull(datPath, "datPath");
         final RowHandler handler = Objects.requireNonNull(rowHandler, "rowHandler");
