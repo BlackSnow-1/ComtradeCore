@@ -4,6 +4,8 @@ import java.util.Objects;
 
 /**
  * Java facade for the complete in-memory {@code comtrade::Record} API.
+ * CFG and DAT parsing supports ASCII, BINARY, BINARY32, and FLOAT32. UTF-8
+ * BOMs at the start of CFG and ASCII DAT files are removed automatically.
  * Native memory is released by {@link #close()}, so use try-with-resources.
  */
 public final class ComtradeRecord implements AutoCloseable {
@@ -102,10 +104,16 @@ public final class ComtradeRecord implements AutoCloseable {
 
     public void clear() { nativeRecord().clear(); }
 
+    /** Parses CFG metadata and stores the data type required by {@link #parseDat(String)}. */
     public boolean parseCfg(String cfgPath) {
         return nativeRecord().parseCfg(Objects.requireNonNull(cfgPath, "cfgPath"));
     }
 
+    /**
+     * Parses an ASCII, BINARY, BINARY32, or FLOAT32 DAT file using the current CFG.
+     * Analog samples are exposed as engineering values after applying the CFG scale
+     * and offset; packed binary digital words are expanded to individual booleans.
+     */
     public boolean parseDat(String datPath) {
         return nativeRecord().parseDat(Objects.requireNonNull(datPath, "datPath"));
     }
@@ -118,7 +126,10 @@ public final class ComtradeRecord implements AutoCloseable {
         return nativeRecord().saveDat(Objects.requireNonNull(datPath, "datPath"));
     }
 
-    /** Transactionally loads a CFG/DAT pair. */
+    /**
+     * Transactionally loads a CFG/DAT pair in any supported DAT type. The existing
+     * record is retained when either file cannot be parsed.
+     */
     public void load(String cfgPath, String datPath) {
         if (!nativeRecord().load(Objects.requireNonNull(cfgPath, "cfgPath"),
                                  Objects.requireNonNull(datPath, "datPath"))) {
