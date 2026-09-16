@@ -3,12 +3,12 @@
  * @brief 顺序写入 ASCII/BINARY/BINARY32/FLOAT32 DAT，避免保存整份波形。
  */
 #pragma once
+#include "binary_io.hpp"
 #include "types.hpp"
 #include <fstream>
 #include <utility>
 #include <vector>
 #include <cmath>
-#include <cstring> // for std::memcpy
 #include <limits>
 #include <stdexcept>
 
@@ -33,27 +33,22 @@ namespace comtrade {
         }
 
         bool open(const std::string &dat_filepath) {
+            close();
+            dat_file_.clear();
+            current_row_index_ = 1;
+
             // Use binary mode for every DAT type so ASCII line endings are
             // emitted exactly as COMTRADE CRLF on every platform.
             std::ios_base::openmode mode = std::ios::out | std::ios::binary;
 
-            if (cfg_.data_type == DataType::BINARY || cfg_.data_type == DataType::BINARY32 ||
-                cfg_.data_type == DataType::FLOAT32) {
+            if (detail::isBinaryDataType(cfg_.data_type)) {
                 // 预计算数字量需要多少个 16-bit word (向上取整)
-                digital_word_count_ = (cfg_.digital_channels.size() + 15) / 16;
-
-                // 计算单行数据精确的字节总数，并预分配缓冲区
-                size_t row_bytes = 4 + 4; // Index (4) + Timestamp (4)
-
-                if (cfg_.data_type == DataType::BINARY) {
-                    row_bytes += cfg_.analog_channels.size() * 2; // 每通道 2 字节
-                } else {
-                    row_bytes += cfg_.analog_channels.size() * 4; // 每通道 4 字节
-                }
-
-                row_bytes += digital_word_count_ * 2; // 每个数字量 Word 占 2 字节
-
-                row_buffer_.resize(row_bytes); // 整个生命周期只分配这一次内存
+                digital_word_count_ = detail::digitalWordCount(cfg_.digital_channels.size());
+                row_buffer_.resize(detail::binaryRowSize(
+                    cfg_.data_type, cfg_.analog_channels.size(), cfg_.digital_channels.size()));
+            } else {
+                digital_word_count_ = 0;
+                row_buffer_.clear();
             }
 
             dat_file_.open(dat_filepath, mode);
@@ -68,6 +63,10 @@ namespace comtrade {
             if (!dat_file_.is_open()) throw std::runtime_error("DAT stream not open.");
             if (!std::isfinite(cfg_.time_multiplier) || cfg_.time_multiplier <= 0.0) {
                 throw std::invalid_argument("COMTRADE time multiplier must be positive and finite.");
+            }
+            if (analog_values.size() != cfg_.analog_channels.size() ||
+                digital_values.size() != cfg_.digital_channels.size()) {
+                throw std::invalid_argument("Sample value counts must match the declared COMTRADE channels.");
             }
 
             const auto raw_timestamp = std::llround(timestamp_us / cfg_.time_multiplier);
@@ -97,7 +96,7 @@ namespace comtrade {
             for (size_t i = 0; i < cfg_.analog_channels.size(); ++i) {
                 const auto &ch = cfg_.analog_channels[i];
                 // 工程值写回原始整数：raw = round((value - b) / a)。
-                const auto raw_val = static_cast<int32_t>(std::round((a_vals[i] - ch.b) / ch.a));
+                const auto raw_val = checkedIntegralAnalog<std::int32_t>(a_vals[i], ch);
                 dat_file_ << "," << raw_val;
             }
             for (const bool val: d_vals) dat_file_ << "," << (val ? 1 : 0);
@@ -109,28 +108,19 @@ namespace comtrade {
             char *ptr = row_buffer_.data();
 
             // 二进制行布局固定为：序号、时间戳、模拟量数组、数字量 word 数组。
-            // memcpy 避免对 char 缓冲区执行潜在未对齐的整数写入。
-            std::memcpy(ptr, &current_row_index_, 4);
-            ptr += 4;
-            std::memcpy(ptr, &ts_us, 4);
-            ptr += 4;
+            detail::writeUint32LittleEndian(ptr, current_row_index_);
+            detail::writeUint32LittleEndian(ptr, ts_us);
 
             // 2. 写入模拟量
             for (size_t i = 0; i < cfg_.analog_channels.size(); ++i) {
                 const auto &ch = cfg_.analog_channels[i];
 
                 if (cfg_.data_type == DataType::BINARY) {
-                    auto raw_val = static_cast<int16_t>(std::round((a_vals[i] - ch.b) / ch.a));
-                    std::memcpy(ptr, &raw_val, 2);
-                    ptr += 2;
+                    detail::writeInt16LittleEndian(ptr, checkedIntegralAnalog<std::int16_t>(a_vals[i], ch));
                 } else if (cfg_.data_type == DataType::BINARY32) {
-                    auto raw_val = static_cast<int32_t>(std::round((a_vals[i] - ch.b) / ch.a));
-                    std::memcpy(ptr, &raw_val, 4);
-                    ptr += 4;
+                    detail::writeInt32LittleEndian(ptr, checkedIntegralAnalog<std::int32_t>(a_vals[i], ch));
                 } else {
-                    const auto raw_val = static_cast<float>((a_vals[i] - ch.b) / ch.a);
-                    std::memcpy(ptr, &raw_val, 4);
-                    ptr += 4;
+                    detail::writeFloat32LittleEndian(ptr, checkedFloatAnalog(a_vals[i], ch));
                 }
             }
 
@@ -144,12 +134,42 @@ namespace comtrade {
                         word |= (1 << bit); // 设置对应位为 1
                     }
                 }
-                std::memcpy(ptr, &word, 2);
-                ptr += 2;
+                detail::writeUint16LittleEndian(ptr, word);
             }
 
             // 4. 单次 IO 刷入流中
             dat_file_.write(row_buffer_.data(), static_cast<std::streamsize>(row_buffer_.size()));
+        }
+
+        static double rawAnalogValue(const double engineering_value, const AnalogChannel &channel) {
+            if (!std::isfinite(engineering_value) || !std::isfinite(channel.a) || channel.a == 0.0 ||
+                !std::isfinite(channel.b)) {
+                throw std::invalid_argument("Analog values and coefficients must be finite and scale must be non-zero.");
+            }
+            const double raw_value = (engineering_value - channel.b) / channel.a;
+            if (!std::isfinite(raw_value)) {
+                throw std::overflow_error("COMTRADE analog value cannot be represented.");
+            }
+            return raw_value;
+        }
+
+        template<typename Integer>
+        static Integer checkedIntegralAnalog(const double engineering_value, const AnalogChannel &channel) {
+            const double rounded = std::round(rawAnalogValue(engineering_value, channel));
+            if (rounded < static_cast<double>(std::numeric_limits<Integer>::lowest()) ||
+                rounded > static_cast<double>(std::numeric_limits<Integer>::max())) {
+                throw std::overflow_error("COMTRADE analog value exceeds the selected DAT integer range.");
+            }
+            return static_cast<Integer>(rounded);
+        }
+
+        static float checkedFloatAnalog(const double engineering_value, const AnalogChannel &channel) {
+            const double raw_value = rawAnalogValue(engineering_value, channel);
+            if (raw_value < -static_cast<double>(std::numeric_limits<float>::max()) ||
+                raw_value > static_cast<double>(std::numeric_limits<float>::max())) {
+                throw std::overflow_error("COMTRADE analog value exceeds the FLOAT32 range.");
+            }
+            return static_cast<float>(raw_value);
         }
     };
 } // namespace comtrade
