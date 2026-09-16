@@ -388,6 +388,38 @@ namespace {
         EXPECT_EQ(reader.getCfg().station_name, utf8_station);
     }
 
+    TEST_F(StreamEngineTest, ReaderProcessesFirstAsciiDatRowWithUtf8Bom) {
+        auto cfg = makeCfg(comtrade::DataType::ASCII, 1, 1);
+        cfg.station_name = "UTF8_BOM_DAT";
+        cfg.rec_dev_id = "RELAY";
+        cfg.version = comtrade::StandardVersion::V1999;
+        cfg.sample_rates = {{1000.0, 2}};
+        cfg.analog_channels[0].a = 0.5;
+        cfg.analog_channels[0].b = 1.0;
+        saveCfg(cfg_path_, cfg);
+
+        {
+            std::ofstream dat_file(dat_path_, std::ios::binary);
+            ASSERT_TRUE(dat_file.is_open());
+            dat_file << "\xEF\xBB\xBF"
+                     << "1,0,10,1\r\n"
+                     << "2,1000,-4,0\r\n";
+        }
+
+        const comtrade::StreamReader reader(cfg_path_.string());
+        std::vector<comtrade::SampleRow> rows;
+        ASSERT_EQ(reader.processDatStream(
+                      dat_path_.string(), [&](const auto& row) { rows.push_back(row); }),
+                  2U);
+        ASSERT_EQ(rows.size(), 2U);
+        EXPECT_EQ(rows[0].index, 1U);
+        EXPECT_DOUBLE_EQ(rows[0].analog_values[0], 6.0);
+        EXPECT_TRUE(rows[0].digital_values[0]);
+        EXPECT_EQ(rows[1].index, 2U);
+        EXPECT_DOUBLE_EQ(rows[1].analog_values[0], -1.0);
+        EXPECT_FALSE(rows[1].digital_values[0]);
+    }
+
     TEST_F(StreamEngineTest, GeneratesComtradeFilesAndStreamsEverySample) {
         // 端到端验证 Writer/Record 生成的 CRLF 文件可被 Reader 逐行还原。
         comtrade::Record generated_record;
