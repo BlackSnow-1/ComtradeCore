@@ -881,18 +881,55 @@ StreamEngineTest.GeneratesComtradeFilesAndStreamsEverySample
 
 ## 目录结构
 
+以下列出仓库中的主要源码与文档；测试数据目录仅展示入口。
+
 ```text
 ComtradeCore/
-├── cmake/                         # CMake package 配置模板
-├── examples/                      # 示例程序
+├── .github/
+│   ├── install-test/              # CMake 安装集成验证
+│   └── workflows/                # CI 与基准测试工作流
+├── benchmarks/
+│   ├── CMakeLists.txt
+│   └── stream_read_benchmark.cpp  # 流式读取性能基准
+├── bindings/java/
+│   ├── CMakeLists.txt             # JNI 动态库与 JAR 构建、安装
+│   ├── comtrade.i                 # SWIG 接口与映射配置
+│   ├── java_api.hpp               # Java 绑定的 C++ 适配层
+│   └── src/main/java/comtrade/
+│       ├── ComtradeRecord.java
+│       ├── ComtradeStreamReader.java
+│       └── ComtradeStreamWriter.java
+├── cmake/
+│   └── ComtradeCoreConfig.cmake.in # CMake package 配置模板
+├── docs/
+│   └── swig-jni-java-binding-guide.md # SWIG/JNI 映射教程
+├── examples/
+│   ├── CMakeLists.txt
+│   ├── example_high_perf_write.cpp # 高性能写入示例
+│   └── record_lifecycle.cpp       # Record 生命周期示例
 ├── include/comtrade/
+│   ├── binary_io.hpp              # 二进制 DAT 布局与小端转换
+│   ├── cfg_io.hpp                 # CFG 解析工具
 │   ├── comtrade.hpp               # Record 统一入口
 │   ├── record.hpp                 # 内存记录的构造、读写
 │   ├── stream_reader.hpp          # 流式读取
 │   ├── stream_writer.hpp          # 流式写入
+│   ├── text_encoding.hpp          # 文本编码转换与 BOM 处理
 │   ├── types.hpp                  # 数据类型和通道定义
 │   └── utils.hpp                  # 内部工具
-├── tests/                         # GoogleTest 单元测试
-├── CMakeLists.txt
+├── tests/
+│   ├── ComtradeFiles/             # 真实 COMTRADE 测试数据
+│   ├── CMakeLists.txt
+│   ├── README.md                  # 测试与基准方法说明
+│   ├── test_real_files.cpp        # 真实文件兼容性测试
+│   ├── test_record.cpp            # 内存记录测试
+│   └── test_stream.cpp            # 流式读写测试
+├── .gitattributes
+├── .gitignore
+├── CMakeLists.txt                 # 顶层构建与安装配置
+├── LICENSE
 └── README.md
 ```
+
+`build-*`、`install*` 等目录是本地构建或安装时生成的产物，不属于上面的源码结构。
+SWIG 生成的 Java 代理和 C++ JNI 包装代码位于所选构建目录的 `bindings/java/generated/` 下。
