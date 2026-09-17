@@ -1,0 +1,42 @@
+name: Release
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    uses: ./.github/workflows/ci.yml
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: ComtradeCore-*
+          path: release-assets
+      - name: Package tested artifacts
+        run: |
+          mkdir -p archives
+          for path in release-assets/*; do
+            name=$(basename "$path")
+            tar -czf "archives/${name}-1.2.0.0.tar.gz" -C "$path" .
+          done
+      - name: Publish only after all CI jobs pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create v1.2.0.0 archives/*.tar.gz
+          --target "$GITHUB_SHA"
+          --title "ComtradeCore 1.2.0.0"
+          --notes-file docs/releases/1.2.0.0.md

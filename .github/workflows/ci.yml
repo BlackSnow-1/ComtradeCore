@@ -6,6 +6,7 @@ on:
       - main
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -15,6 +16,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  java-ai-test:
+    name: Java JNI and AI analysis tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+          cache-dependency-path: analysis/java/pom.xml
+      - name: Install JNI and PDF test dependencies
+        run: sudo apt-get update && sudo apt-get install -y swig fonts-dejavu-core
+      - name: Build and install Java JNI
+        run: |
+          cmake -S . -B build-java -DBUILD_JAVA_BINDINGS=ON -DCOMTRADE_BUILD_TESTS=OFF -DCOMTRADE_BUILD_EXAMPLES=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PWD/staging"
+          cmake --build build-java --parallel 2
+          cmake --install build-java
+          mvn -B org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file -Dfile="$PWD/staging/lib/comtrade/java/comtrade-core-java.jar" -DgroupId=io.github.blacksnow1 -DartifactId=comtrade-core-java -Dversion=1.2.0.0 -Dpackaging=jar -DgeneratePom=true
+      - name: Test statistics, mock HTTP, actual JNI and PDF export
+        run: mvn -B -f analysis/java/pom.xml verify -Dnative.library.path="$PWD/staging/lib/comtrade/java"
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: java-ai-test-results
+          path: analysis/java/target/surefire-reports
+      - name: Assemble Java release files
+        run: |
+          mkdir -p java-package
+          cp staging/lib/comtrade/java/* java-package/
+          cp analysis/java/target/comtrade-ai-java-*.jar java-package/
+          cp analysis/java/pom.xml java-package/comtrade-ai-java-1.2.0.0.pom
+          cp config/ai-config.example.json java-package/
+          cp README.md LICENSE java-package/
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ComtradeCore-java-ai-linux
+          path: java-package
+          if-no-files-found: error
+
   build-test-install:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}

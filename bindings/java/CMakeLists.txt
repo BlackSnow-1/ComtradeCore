@@ -63,6 +63,7 @@ add_custom_command(
         COMMAND "${CMAKE_COMMAND}" -E rm -rf "${COMTRADE_JAVA_CLASSES_DIR}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${COMTRADE_JAVA_CLASSES_DIR}"
         COMMAND "${Java_JAVAC_EXECUTABLE}"
+                --release 17
                 -encoding UTF-8
                 -d "${COMTRADE_JAVA_CLASSES_DIR}"
                 ${COMTRADE_SWIG_JAVA_SOURCES}

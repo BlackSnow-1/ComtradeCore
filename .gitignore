@@ -70,3 +70,10 @@ Testing/
 /cmake-build-release/
 /cmake-build-debug/
 .idea/
+
+# Local AI credentials and generated analysis reports
+ai-config.json
+*.ai.local.json
+analysis-reports/
+target/
+.tools/
