@@ -17,7 +17,7 @@ class NativeAnalysisTest {
             record.setStationAndDevice("private-station","relay",ComtradeRecord.StandardVersion.V2013);
             record.setTimestamps("01/01/2024,00:00:00.000000","01/01/2024,00:00:00.001000");
             record.setDataType(type);
-            record.addAnalogChannel(1,"IA","A","A",1,0);
+            record.addAnalogChannel(1,"IA","A","A",0.5,1);
             record.addDigitalChannel(1,"trip","",false);
             record.addSampleRate(new ComtradeRecord.SampleRate(1000,2));
             record.addSample(0,new double[]{3},new boolean[]{false});

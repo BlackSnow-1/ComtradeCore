@@ -30,4 +30,19 @@ class PdfReportExporterTest {
         assertThrows(java.io.IOException.class,()->PdfReportExporter.write(new AnalysisReport(Instant.now(),"mock",AiConfig.JSON.createObjectNode(),"text"),dir.resolve("absent.ttf"),pdf));
         assertFalse(Files.exists(pdf));
     }
+    @Test void embedsChineseCollectionFontWithoutLosingText() throws Exception {
+        Path font=Path.of(System.getProperty("test.pdf.cjk.font","/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"));
+        assertTrue(Files.isRegularFile(font),"Set -Dtest.pdf.cjk.font to a Chinese TTF/TTC font");
+        Path pdf=dir.resolve("chinese.pdf");
+        PdfReportExporter.write(new AnalysisReport(Instant.now(),"mock",AiConfig.JSON.createObjectNode(),"录波分析：模拟量峰值与开关量变位，需要人工复核。"),font,pdf);
+        try (var doc=Loader.loadPDF(pdf.toFile())) {
+            assertTrue(new PDFTextStripper().getText(doc).contains("录波分析：模拟量峰值与开关量变位，需要人工复核。"));
+            // Exercise PDF rendering as well as structural/text checks.
+            var image=new org.apache.pdfbox.rendering.PDFRenderer(doc).renderImageWithDPI(0,72);
+            assertTrue(image.getWidth()>500); assertTrue(image.getHeight()>700);
+            Path artifacts=Path.of("target/test-artifacts"); Files.createDirectories(artifacts);
+            javax.imageio.ImageIO.write(image,"png",artifacts.resolve("chinese-report.png").toFile());
+            Files.copy(pdf,artifacts.resolve("chinese-report.pdf"),StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
 }

@@ -26,6 +26,10 @@ public final class AiConfig {
                 || !("https".equals(endpoint.getScheme()) || ("http".equals(endpoint.getScheme()) && local && flag("allowInsecureLocalhost"))))
             throw new IllegalArgumentException("Endpoint requires HTTPS; HTTP is allowed only for explicitly enabled localhost. No URL credentials/query/fragment.");
         required("model");
+        flag("includeIdentifiers");
+        flag("allowInsecureLocalhost");
+        text("instructions", "");
+        text("pdfFontPath", "");
         String env = text("tokenEnv", "COMTRADE_AI_TOKEN");
         String supplied = env.isBlank() ? null : System.getenv(env);
         token = supplied == null || supplied.isBlank() ? text("token", "") : supplied;

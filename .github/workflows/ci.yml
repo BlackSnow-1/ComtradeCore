@@ -31,7 +31,7 @@ jobs:
           cache: maven
           cache-dependency-path: analysis/java/pom.xml
       - name: Install JNI and PDF test dependencies
-        run: sudo apt-get update && sudo apt-get install -y swig fonts-dejavu-core
+        run: sudo apt-get update && sudo apt-get install -y swig fonts-dejavu-core fonts-wqy-microhei
       - name: Build and install Java JNI
         run: |
           cmake -S . -B build-java -DBUILD_JAVA_BINDINGS=ON -DCOMTRADE_BUILD_TESTS=OFF -DCOMTRADE_BUILD_EXAMPLES=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PWD/staging"
@@ -45,7 +45,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: java-ai-test-results
-          path: analysis/java/target/surefire-reports
+          path: |
+            analysis/java/target/surefire-reports
+            analysis/java/target/test-artifacts
       - name: Assemble Java release files
         run: |
           mkdir -p java-package

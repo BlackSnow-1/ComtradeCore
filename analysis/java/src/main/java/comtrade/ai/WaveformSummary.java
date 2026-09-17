@@ -12,6 +12,7 @@ public final class WaveformSummary {
     private long eventsSeen;
     private final Stats[] totals;
     private final boolean[] previousDigital;
+    private final boolean[] initialDigital;
     private final long[] transitions;
     private final List<Window> windows = new ArrayList<>();
     private final ArrayNode events = AiConfig.JSON.createArrayNode();
@@ -23,7 +24,7 @@ public final class WaveformSummary {
         maxWindows = config.integer("maxWindows", 64, 2, 1024);
         maxEvents = config.integer("maxDigitalEvents", 200, 0, 10000);
         windowNs = config.integer("windowMillis", 20, 1, 60000) * 1_000_000L;
-        totals = stats(analogCount); previousDigital = new boolean[digitalCount]; transitions = new long[digitalCount];
+        totals = stats(analogCount); previousDigital = new boolean[digitalCount]; initialDigital = new boolean[digitalCount]; transitions = new long[digitalCount];
     }
 
     public void accept(long index, long timeNs, double[] analog, boolean[] digital) {
@@ -47,6 +48,7 @@ public final class WaveformSummary {
             totals[i].add(analog[i], timeNs); current.values[i].add(analog[i], timeNs);
         }
         for (int i=0; i<digitalCount; i++) {
+            if (count == 1) initialDigital[i] = digital[i];
             if (count > 1 && previousDigital[i] != digital[i]) {
                 transitions[i]++; eventsSeen++;
                 if (events.size() < maxEvents) events.addObject().put("channel", "D"+(i+1)).put("timeNs", timeNs).put("sample", index).put("value", digital[i]);
@@ -79,7 +81,7 @@ public final class WaveformSummary {
         ArrayNode analogs = out.putArray("analog");
         for (int i=0; i<analogCount; i++) analogs.add(totals[i].json().put("channel", "A"+(i+1)));
         ArrayNode digitals = out.putArray("digital");
-        for (int i=0; i<digitalCount; i++) digitals.addObject().put("channel", "D"+(i+1)).put("transitions", transitions[i]).put("finalState", previousDigital[i]);
+        for (int i=0; i<digitalCount; i++) digitals.addObject().put("channel", "D"+(i+1)).put("transitions", transitions[i]).put("initialState", initialDigital[i]).put("finalState", previousDigital[i]);
         out.set("digitalEvents", events.deepCopy());
         ArrayNode bins = out.putArray("windows");
         for (Window window : windows) {
