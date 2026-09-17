@@ -11,6 +11,8 @@ public final class WaveformSummary {
     private long windowNs, count, previousIndex, previousTime, firstTime, lastTime, gaps, badTimes, invalid;
     private long eventsSeen;
     private final Stats[] totals;
+    private final Stats[] beforeTrigger, fromTrigger;
+    private final Long triggerNs;
     private final boolean[] previousDigital;
     private final boolean[] initialDigital;
     private final long[] transitions;
@@ -18,9 +20,13 @@ public final class WaveformSummary {
     private final ArrayNode events = AiConfig.JSON.createArrayNode();
 
     public WaveformSummary(int analogCount, int digitalCount, AiConfig config) {
+        this(analogCount,digitalCount,config,null);
+    }
+    public WaveformSummary(int analogCount, int digitalCount, AiConfig config, Long triggerNs) {
         if (analogCount < 0 || digitalCount < 0 || (long) analogCount + digitalCount > config.integer("maxChannels", 64, 1, 512))
             throw new IllegalArgumentException("Channel count exceeds configured limit");
         this.analogCount = analogCount; this.digitalCount = digitalCount;
+        this.triggerNs=triggerNs; beforeTrigger=stats(analogCount); fromTrigger=stats(analogCount);
         maxWindows = config.integer("maxWindows", 64, 2, 1024);
         maxEvents = config.integer("maxDigitalEvents", 200, 0, 10000);
         windowNs = config.integer("windowMillis", 20, 1, 60000) * 1_000_000L;
@@ -46,6 +52,7 @@ public final class WaveformSummary {
         for (int i=0; i<analogCount; i++) {
             if (!Double.isFinite(analog[i])) { invalid++; continue; }
             totals[i].add(analog[i], timeNs); current.values[i].add(analog[i], timeNs);
+            if (triggerNs!=null) (timeNs<triggerNs ? beforeTrigger[i] : fromTrigger[i]).add(analog[i],timeNs);
         }
         for (int i=0; i<digitalCount; i++) {
             if (count == 1) initialDigital[i] = digital[i];
@@ -80,6 +87,14 @@ public final class WaveformSummary {
         out.put("rmsDefinition", "Sample-weighted sqrt(mean(x^2)), includes DC; not fundamental or time-weighted RMS. No CT/PT conversion beyond CFG a*x+b.");
         ArrayNode analogs = out.putArray("analog");
         for (int i=0; i<analogCount; i++) analogs.add(totals[i].json().put("channel", "A"+(i+1)));
+        if (triggerNs!=null) {
+            out.put("triggerOffsetNs",triggerNs);
+            ArrayNode pre=out.putArray("beforeTrigger"),post=out.putArray("fromTrigger");
+            for (int i=0;i<analogCount;i++) {
+                pre.add(beforeTrigger[i].json().put("channel","A"+(i+1)));
+                post.add(fromTrigger[i].json().put("channel","A"+(i+1)));
+            }
+        }
         ArrayNode digitals = out.putArray("digital");
         for (int i=0; i<digitalCount; i++) digitals.addObject().put("channel", "D"+(i+1)).put("transitions", transitions[i]).put("initialState", initialDigital[i]).put("finalState", previousDigital[i]);
         out.set("digitalEvents", events.deepCopy());

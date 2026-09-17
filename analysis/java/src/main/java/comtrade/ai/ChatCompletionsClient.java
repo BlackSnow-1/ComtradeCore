@@ -47,6 +47,9 @@ public final class ChatCompletionsClient implements ModelClient {
             JsonNode root=AiConfig.JSON.readTree(response.body());
             JsonNode choice=root.path("choices").path(0);
             if (!"stop".equals(choice.path("finish_reason").asText())) throw new IOException("Model response incomplete, refused or contains tool calls");
+            JsonNode message=choice.path("message");
+            if (message.path("tool_calls").size()>0 || message.hasNonNull("function_call") || message.hasNonNull("refusal"))
+                throw new IOException("Model refused or requested a tool call");
             JsonNode content=choice.path("message").path("content");
             if (!content.isTextual() || content.asText().isBlank()) throw new IOException("Model returned no analysis text");
             // Defensive redaction if a provider accidentally echoes a credential.

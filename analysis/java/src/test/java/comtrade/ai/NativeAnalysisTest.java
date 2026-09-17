@@ -29,6 +29,9 @@ class NativeAnalysisTest {
         assertEquals(2,e.path("samples").asLong()); assertEquals(type.name(),e.path("dataType").asText());
         assertEquals(Math.sqrt(12.5),e.path("analog").get(0).path("rms").asDouble(),1e-10);
         assertEquals(1,e.path("digitalEventsTotal").asInt()); assertEquals(64,e.path("datSha256").asText().length());
+        assertEquals(1_000_000,e.path("triggerOffsetNs").asLong());
+        assertEquals(3,e.path("beforeTrigger").get(0).path("rms").asDouble());
+        assertEquals(4,e.path("fromTrigger").get(0).path("rms").asDouble());
         assertFalse(e.toString().contains("private-station"));
         e.put("samples",99); assertEquals(2,report.evidence().path("samples").asInt());
     }

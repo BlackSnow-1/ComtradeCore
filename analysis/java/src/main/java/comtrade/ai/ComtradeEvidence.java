@@ -18,7 +18,14 @@ public final class ComtradeEvidence {
         if (!Files.isRegularFile(cfg) || !Files.isRegularFile(dat)) throw new IOException("CFG and DAT must be readable files");
         String cfgHash=sha256(cfg), datHash=sha256(dat);
         try (ComtradeStreamReader reader=new ComtradeStreamReader(cfg.toString())) {
-            WaveformSummary accumulator=new WaveformSummary(reader.getAnalogChannelCount(),reader.getDigitalChannelCount(),config);
+            Long triggerNs=null;
+            try {
+                var format=new java.time.format.DateTimeFormatterBuilder().appendPattern("dd/MM/uuuu,HH:mm:ss")
+                        .appendFraction(java.time.temporal.ChronoField.NANO_OF_SECOND,0,9,true).toFormatter(java.util.Locale.ROOT);
+                triggerNs=java.time.Duration.between(java.time.LocalDateTime.parse(reader.getStartTime(),format),
+                        java.time.LocalDateTime.parse(reader.getTriggerTime(),format)).toNanos();
+            } catch (java.time.DateTimeException | ArithmeticException ignored) { /* Report unavailable partition below. */ }
+            WaveformSummary accumulator=new WaveformSummary(reader.getAnalogChannelCount(),reader.getDigitalChannelCount(),config,triggerNs);
             RuntimeException[] failure={null};
             reader.processDatStream(dat.toString(), row -> {
                 // Never let a Java exception unwind through a SWIG director/native stack.
@@ -53,6 +60,9 @@ public final class ComtradeEvidence {
             }
             result.put("cfgExpectedSamples",expected);
             ArrayNode warnings=result.putArray("warnings");
+            warnings.add("Before/from-trigger statistics partition at CFG trigger time; trigger is not necessarily fault inception. Channel skew is metadata only, not time-compensated.");
+            if (triggerNs==null) warnings.add("Could not derive trigger offset; trigger-relative partitions are unavailable.");
+            else if (triggerNs<result.path("firstTimeNs").asLong() || triggerNs>result.path("lastTimeNs").asLong()) warnings.add("CFG trigger lies outside sampled time range.");
             warnings.add("Parser supplies valid rows only; malformed rows/trailing partial binary records may be skipped. Summary does not certify file completeness.");
             warnings.add("No phasors, frequency estimation, harmonics, protection settings or fault-distance calculation. Do not infer these from RMS windows.");
             warnings.add("Timestamps come from DAT with TIMEMULT; repeated/zero timestamps are not reconstructed from sample rates.");
