@@ -137,6 +137,32 @@ Java 绑定提供 `comtrade.ComtradeRecord`、`ComtradeStreamReader` 和 `Comtra
 还必须能够找到当前平台对应的动态库。
 它不是一个不依赖本地代码的纯 Java JAR。
 
+### 为什么独立封装 Java API
+
+独立封装并不是 JNI 的强制要求，但直接把全部 C++ 头文件交给 SWIG 会向 Java 用户暴露
+`std::vector`、引用、指针、析构和回调等 C++ 细节。当前绑定因此采用分层结构：
+
+```text
+ComtradeCore C++ 核心
+        ↓
+bindings/java/java_api.hpp（转换为 SWIG 友好的类型和接口）
+        ↓
+SWIG 生成的 ComtradeNative* JNI 代理
+        ↓
+ComtradeRecord / ComtradeStreamReader / ComtradeStreamWriter
+```
+
+最外层 Java 门面主要负责：
+
+- 使用 `double[]`、`boolean[]`、Java 枚举等自然类型代替 SWIG 容器；
+- 使用 `AutoCloseable` 和 `try-with-resources` 明确释放底层 C++ 对象；
+- 将 C++ 流式回调转换为可直接使用 Java Lambda 的 `RowHandler`；
+- 集中处理空值、对象状态、异常和 JNI 动态库加载；
+- 隔离 SWIG 生成代码，使内部映射变化时尽量不影响业务代码。
+
+因此业务项目应优先使用 `comtrade.ComtradeRecord`、`ComtradeStreamReader` 和
+`ComtradeStreamWriter`，不要直接依赖 `ComtradeNative*`、`DoubleVector` 或 `IntVector` 等生成类。
+
 ### 构建和安装
 
 安装 SWIG 和 JDK 后启用 `BUILD_JAVA_BINDINGS`：
