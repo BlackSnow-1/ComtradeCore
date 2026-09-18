@@ -25,7 +25,6 @@ ComtradeCore 是一个轻量、Header-only 的 C++17 COMTRADE 库，用于构造
 - 生成的 CFG 和 ASCII DAT 在所有平台统一使用 COMTRADE CRLF 行结束符。
 - 支持 IEEE C37.111 的 1991、1999 和 2013 版本标识。
 - 提供可安装的 CMake package，安装后可通过 `find_package()` 使用。
-- 可选 Java AI 模块：本地流式生成录波证据摘要、调用大模型辅助分析、导出可追溯的中文 PDF 报告。
 
 二进制 DAT 按 COMTRADE 小端布局处理：`BINARY` 使用 16 位有符号模拟量，`BINARY32` 使用 32 位
 有符号模拟量，`FLOAT32` 使用 IEEE 754 单精度模拟量；数字量均按每 16 路一个状态字打包。
@@ -40,8 +39,7 @@ IEEE/IEC C37.111-2013 CFG 支持采样率段、时间倍率、小数秒精度、
 - CMake 3.14 或更高版本。
 - Linux 和 macOS 需要系统提供 `iconv`（glibc 发行版和 macOS 通常已经内置）。
 - GoogleTest 仅在构建单元测试时需要；核心库本身不依赖 GoogleTest。
-- Java 绑定为可选组件；构建时还需要 SWIG 4.0 或更高版本、完整 JDK 17+（包含 JNI 头文件）。
-- AI 分析模块需要 Maven、模型服务配置与 Unicode TTF/TTC 字体，依赖由 Maven 获取；C++ 核心依旧无新增第三方库依赖。
+- Java 绑定为可选组件；构建时还需要 SWIG 4.0 或更高版本、JDK（包含 JNI 头文件）和 Java 编译器。
 
 ## 安装与集成
 
@@ -303,7 +301,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
   -Dfile="$PWD/install/lib/comtrade/java/comtrade-core-java.jar" \
   -DgroupId=io.github.blacksnow1 \
   -DartifactId=comtrade-core-java \
-  -Dversion=1.2.0.0 \
+  -Dversion=1.1.0.0 \
   -Dpackaging=jar \
   -DgeneratePom=true
 ```
@@ -314,7 +312,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
 <dependency>
     <groupId>io.github.blacksnow1</groupId>
     <artifactId>comtrade-core-java</artifactId>
-    <version>1.2.0.0</version>
+    <version>1.1.0.0</version>
 </dependency>
 ```
 
@@ -514,7 +512,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file `
   "-Dfile=D:\testjavaInterface\libs\comtrade-core-java.jar" `
   "-DgroupId=io.github.blacksnow1" `
   "-DartifactId=comtrade-core-java" `
-  "-Dversion=1.2.0.0" `
+  "-Dversion=1.1.0.0" `
   "-Dpackaging=jar" `
   "-DgeneratePom=true"
 ```
@@ -522,7 +520,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file `
 安装位置默认为：
 
 ```text
-%USERPROFILE%\.m2\repository\io\github\blacksnow1\comtrade-core-java\1.2.0.0\
+%USERPROFILE%\.m2\repository\io\github\blacksnow1\comtrade-core-java\1.1.0.0\
 ```
 
 随后在项目的 `pom.xml` 中声明：
@@ -531,7 +529,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file `
 <dependency>
     <groupId>io.github.blacksnow1</groupId>
     <artifactId>comtrade-core-java</artifactId>
-    <version>1.2.0.0</version>
+    <version>1.1.0.0</version>
 </dependency>
 ```
 
@@ -555,7 +553,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
   -Dfile=/path/to/comtrade-install/lib/comtrade/java/comtrade-core-java.jar \
   -DgroupId=io.github.blacksnow1 \
   -DartifactId=comtrade-core-java \
-  -Dversion=1.2.0.0 \
+  -Dversion=1.1.0.0 \
   -Dpackaging=jar \
   -DgeneratePom=true
 ```
@@ -566,7 +564,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
 <dependency>
     <groupId>io.github.blacksnow1</groupId>
     <artifactId>comtrade-core-java</artifactId>
-    <version>1.2.0.0</version>
+    <version>1.1.0.0</version>
 </dependency>
 ```
 
@@ -592,7 +590,7 @@ mvn org.apache.maven.plugins:maven-deploy-plugin:3.1.4:deploy-file \
   -Dfile=/path/to/comtrade-install/lib/comtrade/java/comtrade-core-java.jar \
   -DgroupId=io.github.blacksnow1 \
   -DartifactId=comtrade-core-java \
-  -Dversion=1.2.0.0 \
+  -Dversion=1.1.0.0 \
   -Dpackaging=jar \
   -DrepositoryId=internal-releases \
   -Durl=https://maven.example.com/repository/maven-releases/
@@ -668,133 +666,6 @@ public final class Main {
 
 `reader.getDataType()` 可用于记录或校验实际编码；四种 DAT 类型使用相同的回调数据结构，回调中的
 模拟量已经应用 CFG 的 `a`、`b` 系数，数字量已经从二进制状态字展开。
-
-## AI 录波分析与 PDF 报告（1.2.0.0）
-
-可选模块 `analysis/java` 提供 `comtrade.ai.ComtradeAiAnalyzer` Java 接口，复用 JNI 流式解析
-ASCII、BINARY、BINARY32、FLOAT32。模型接收本地计算的有界证据摘要，适合辅助研判和生成报告。
-详细的计算定义、数据损失与使用边界见 [AI 分析设计说明](docs/ai-analysis.md)。
-
-### 数据如何处理
-
-- 本地逐采样统计每个通道的最小/最大值、峰值时间、均值和样本加权 RMS，工程量不重复缩放。
-- 根据 CFG 触发时间提供触发前/触发起的对比统计；触发时刻不等于已确认的故障起始。
-- 生成分段统计，窗口数量超限后合并相邻窗口并保留极值；保留开关量初末状态、变位次数和有限条事件。
-- 记录序号断续、异常时间、非有限数值、样本数差异和事件截断，避免将不完整数据当作完整录波。
-- 默认不发送站点、设备或通道名称；仍发送时间、相别、单位和摘要。调用 `analyze` 即向配置的服务发送这些数据。
-- 报告区分本地测量事实与模型推断，保留 CFG/DAT 的 SHA-256、模型 ID 和摘要附录。
-
-RMS 包含直流分量，不等于基波 RMS；变采样率时使用样本权重。当前不计算相量、谐波、故障测距或
-保护判据。窗口合并会降低时间分辨率，模型结论需要结合原始录波人工复核。
-
-### 配置模型服务
-
-将 [配置模板](config/ai-config.example.json) 复制为项目根目录的 `ai-config.json`（已被 Git 忽略）：
-
-```bash
-cp config/ai-config.example.json ai-config.json
-export COMTRADE_AI_TOKEN='你的 token'
-```
-
-Windows PowerShell 对应为：
-
-```powershell
-Copy-Item config/ai-config.example.json ai-config.json
-$env:COMTRADE_AI_TOKEN = '你的 token'
-```
-
-编辑配置中的以下项目：
-
-| 字段 | 用途 |
-| --- | --- |
-| `endpoint` | 完整的 HTTPS Chat Completions 请求 URL，例如服务商的 `/v1/chat/completions`，不填网站首页 |
-| `model` | 该服务支持的模型 ID |
-| `tokenEnv` / `token` | 优先使用指定环境变量；也可在本地配置的 `token` 字段填写，不要提交真实凭据 |
-| `headers` | 服务商额外请求头，不能覆盖 Authorization/Content-Type 等保留头 |
-| `requestParameters` | 服务商请求参数，例如 temperature、max_tokens；不能覆盖 model/messages/stream/tools 等保留字段 |
-| `instructions` | 分析语言和报告要求 |
-| `timeoutSeconds` | 整个模型请求的超时，默认 120 秒 |
-| `maxRequestBytes` / `maxResponseBytes` | HTTP 请求/响应字节上限；请求超限会报错，不会静默丢弃数据 |
-| `maxChannels` / `maxWindows` / `windowMillis` | 通道上限、摘要窗口上限与初始窗口时长 |
-| `maxDigitalEvents` | 保留的开关量事件条数，超出后仍统计总次数 |
-| `includeIdentifiers` | 是否包含站点、设备和通道名称，默认 false |
-| `pdfFontPath` | 支持报告语言的 TTF/TTC 字体绝对路径；TTC 使用集合中的首个字体 |
-
-Linux 中文字体可安装 `fonts-wqy-microhei`，字体路径填
-`/usr/share/fonts/truetype/wqy/wqy-microhei.ttc`。Windows 可填写实际存在的中文字体，例如
-`C:/Windows/Fonts/simhei.ttf`。缺失字形会报错；字体不打包到发布 JAR 中。
-不同供应商可能使用不同参数名，请按其文档修改 `requestParameters`。非 Chat Completions 协议可实现
-`ModelClient` 并传给 `ComtradeAiAnalyzer(config, client)`。
-
-### 构建、测试与 Maven 引入
-
-先按前文构建 JNI，并将基础 JAR 安装到本地 Maven 仓库（版本 `1.2.0.0`）。然后从仓库根目录执行：
-
-```bash
-mvn -f analysis/java/pom.xml clean install \
-  -Dnative.library.path="$PWD/install/lib/comtrade/java"
-```
-
-Linux 测试还需安装 `fonts-dejavu-core` 和 `fonts-wqy-microhei`。Windows 测试需指定本机字体：
-
-```powershell
-mvn -f analysis/java/pom.xml clean install `
-  "-Dnative.library.path=$PWD\install-windows\lib\comtrade\java" `
-  "-Dtest.pdf.font=C:\Windows\Fonts\arial.ttf" `
-  "-Dtest.pdf.cjk.font=C:\Windows\Fonts\simhei.ttf"
-```
-
-业务项目加入：
-
-```xml
-<dependency>
-    <groupId>io.github.blacksnow1</groupId>
-    <artifactId>comtrade-ai-java</artifactId>
-    <version>1.2.0.0</version>
-</dependency>
-```
-
-使用 Release 附件时，先安装基础 JAR，再使用附件中的 POM 安装 AI JAR，保留其传递依赖：
-
-```bash
-mvn install:install-file -Dfile=comtrade-core-java.jar \
-  -DgroupId=io.github.blacksnow1 -DartifactId=comtrade-core-java -Dversion=1.2.0.0 -Dpackaging=jar
-mvn install:install-file -Dfile=comtrade-ai-java-1.2.0.0.jar -DpomFile=comtrade-ai-java-1.2.0.0.pom
-```
-
-这些构件通过 GitHub Release 分发，并未自动上传 Maven Central。JNI 动态库仍须部署到运行机器；
-Java AI Release 附件提供 Linux x86_64 JNI，Windows/macOS 请按前文在目标平台构建。
-
-### Java 调用示例
-
-```java
-import comtrade.ai.AiConfig;
-import comtrade.ai.ComtradeAiAnalyzer;
-import comtrade.ai.AnalysisReport;
-import java.nio.file.Path;
-import java.nio.file.Files;
-
-public class AnalyzeRecording {
-    public static void main(String[] args) throws Exception {
-        AiConfig config = AiConfig.load(Path.of("ai-config.json"));
-        ComtradeAiAnalyzer analyzer = new ComtradeAiAnalyzer(config);
-        Path cfg = Path.of("/home/wangguangbo/ComtradeFiles/cometrade/000002.CFG");
-        Path dat = Path.of("/home/wangguangbo/ComtradeFiles/cometrade/000002.DAT");
-
-        // 可选：只在本地查看摘要，不发起模型请求。
-        System.out.println(analyzer.summarize(cfg, dat).toPrettyString());
-
-        // 重新流式读取并将摘要发送到所配置的服务。
-        AnalysisReport report = analyzer.analyze(cfg, dat);
-        Files.createDirectories(Path.of("analysis-reports"));
-        analyzer.exportPdf(report, Path.of("analysis-reports/report.pdf"));
-    }
-}
-```
-
-运行时仍需配置 `--enable-native-access=ALL-UNNAMED` 和 `-Djava.library.path=...`。
-已有报告不会覆盖；再次运行时请选择新的 PDF 文件名。HTTP 错误、超时、超限和模型输出被截断时会
-抛出异常，不自动重试或生成看似成功的报告。CI 使用本地模拟模型服务，不需要真实 token 或付费请求。
 
 ## 生成 COMTRADE 文件
 
@@ -1017,11 +888,6 @@ ComtradeCore/
 ├── .github/
 │   ├── install-test/              # CMake 安装集成验证
 │   └── workflows/                # CI 与基准测试工作流
-├── analysis/java/                # 可选 Java AI 分析模块
-│   ├── pom.xml                    # Jackson、PDFBox、JUnit 依赖
-│   └── src/
-│       ├── main/java/comtrade/ai/ # 配置、摘要、模型请求、PDF 报告
-│       └── test/java/comtrade/ai/ # 统计、HTTP、JNI、PDF 测试
 ├── benchmarks/
 │   ├── CMakeLists.txt
 │   └── stream_read_benchmark.cpp  # 流式读取性能基准
@@ -1035,11 +901,7 @@ ComtradeCore/
 │       └── ComtradeStreamWriter.java
 ├── cmake/
 │   └── ComtradeCoreConfig.cmake.in # CMake package 配置模板
-├── config/
-│   └── ai-config.example.json     # 无真实凭据的模型配置模板
 ├── docs/
-│   ├── ai-analysis.md             # AI 数据处理定义与局限
-│   ├── releases/                 # 版本发布说明
 │   └── swig-jni-java-binding-guide.md # SWIG/JNI 映射教程
 ├── examples/
 │   ├── CMakeLists.txt
@@ -1071,3 +933,15 @@ ComtradeCore/
 
 `build-*`、`install*` 等目录是本地构建或安装时生成的产物，不属于上面的源码结构。
 SWIG 生成的 Java 代理和 C++ JNI 包装代码位于所选构建目录的 `bindings/java/generated/` 下。
+
+## C++ AI 录波分析（可选）
+
+`analysis/cpp` 提供 C++17 实现的录波摘要、完整波形模型分析和中文 PDF 报告。
+使用 cpp-httplib/OpenSSL、nlohmann/json 与 libharu，无 Qt、Java/JNI 依赖。
+默认关闭，不增加核心库依赖。详见 [构建、配置与测试说明](docs/ai-analysis.md)。
+
+```sh
+cmake -S . -B build-ai -DCOMTRADE_BUILD_AI=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build build-ai --config Release --parallel 2
+ctest --test-dir build-ai -C Release --output-on-failure
+```

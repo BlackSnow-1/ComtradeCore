@@ -16,50 +16,90 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  java-ai-test:
-    name: Java JNI and AI analysis tests
+  ai-test-font:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    steps:
+      - run: sudo apt-get update && sudo apt-get install -y fonts-wqy-microhei
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ai-test-font
+          path: /usr/share/fonts/truetype/wqy/wqy-microhei.ttc
+
+  cpp-ai-test:
+    name: C++ AI (${{ matrix.name }})
+    needs: ai-test-font
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: linux-gcc, os: ubuntu-latest, compiler: '-DCMAKE_CXX_COMPILER=g++'}
+          - {name: linux-clang, os: ubuntu-latest, compiler: '-DCMAKE_CXX_COMPILER=clang++'}
+          - {name: windows-msvc, os: windows-latest, compiler: ''}
+          - {name: macos-clang, os: macos-latest, compiler: ''}
+    runs-on: ${{ matrix.os }}
+    env:
+      COMTRADE_TEST_FONT: ${{ github.workspace }}/test-font/wqy-microhei.ttc
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - uses: actions/setup-java@v4
+      - uses: actions/download-artifact@v8
         with:
-          distribution: temurin
-          java-version: '17'
-          cache: maven
-          cache-dependency-path: analysis/java/pom.xml
-      - name: Install JNI and PDF test dependencies
-        run: sudo apt-get update && sudo apt-get install -y swig fonts-dejavu-core fonts-wqy-microhei
-      - name: Build and install Java JNI
+          name: ai-test-font
+          path: test-font
+      - name: Linux dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev poppler-utils
+      - name: macOS dependencies
+        if: runner.os == 'macOS'
         run: |
-          cmake -S . -B build-java -DBUILD_JAVA_BINDINGS=ON -DCOMTRADE_BUILD_TESTS=OFF -DCOMTRADE_BUILD_EXAMPLES=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PWD/staging"
-          cmake --build build-java --parallel 2
-          cmake --install build-java
-          mvn -B org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file -Dfile="$PWD/staging/lib/comtrade/java/comtrade-core-java.jar" -DgroupId=io.github.blacksnow1 -DartifactId=comtrade-core-java -Dversion=1.2.0.0 -Dpackaging=jar -DgeneratePom=true
-      - name: Test statistics, mock HTTP, actual JNI and PDF export
-        run: mvn -B -f analysis/java/pom.xml verify -Dnative.library.path="$PWD/staging/lib/comtrade/java"
-      - name: Upload test reports
+          brew install openssl@3
+          echo "OPENSSL_ROOT_DIR=$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+      - name: Windows dependencies
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install openssl:x64-windows
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "OPENSSL_ROOT_DIR=$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows" >> $env:GITHUB_ENV
+          "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin" >> $env:GITHUB_PATH
+      - name: Configure C++ AI
+        run: >-
+          cmake -S . -B build-ai ${{ matrix.compiler }}
+          -DCMAKE_BUILD_TYPE=Release -DCOMTRADE_BUILD_AI=ON
+          -DCOMTRADE_BUILD_TESTS=ON -DCOMTRADE_BUILD_EXAMPLES=OFF
+          -DCMAKE_DISABLE_FIND_PACKAGE_GTest=ON
+          -DCMAKE_POLICY_VERSION_MINIMUM=3.10
+          -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/staging-ai"
+      - run: cmake --build build-ai --config Release --parallel 2
+      - name: Unit and local HTTP/PDF integration tests
+        run: ctest --test-dir build-ai -C Release -L ai --output-on-failure --output-junit ai-tests.xml
+      - name: Verify Chinese PDF text, pagination and rendering
+        if: runner.os == 'Linux'
+        run: python3 analysis/cpp/tests/verify_pdf.py build-ai/analysis/cpp/ai-test-artifacts/EndToEndChinesePdf/report.pdf
+      - run: cmake --install build-ai --config Release
+      - name: Configure installed AI consumer
+        run: >-
+          cmake -S .github/ai-install-test -B ai-consumer ${{ matrix.compiler }}
+          -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${{ github.workspace }}/staging-ai"
+      - run: cmake --build ai-consumer --config Release --parallel 2
+      - run: ctest --test-dir ai-consumer -C Release --output-on-failure
+      - name: Include Windows TLS runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Copy-Item "$env:OPENSSL_ROOT_DIR/bin/*.dll" staging-ai/bin/
+      - uses: actions/upload-artifact@v7
         if: always()
-        uses: actions/upload-artifact@v7
         with:
-          name: java-ai-test-results
+          name: cpp-ai-results-${{ matrix.name }}
           path: |
-            analysis/java/target/surefire-reports
-            analysis/java/target/test-artifacts
-      - name: Assemble Java release files
-        run: |
-          mkdir -p java-package
-          cp staging/lib/comtrade/java/* java-package/
-          cp analysis/java/target/comtrade-ai-java-*.jar java-package/
-          cp analysis/java/pom.xml java-package/comtrade-ai-java-1.2.0.0.pom
-          cp config/ai-config.example.json java-package/
-          cp README.md LICENSE java-package/
+            build-ai/ai-tests.xml
+            build-ai/analysis/cpp/ai-test-artifacts
       - uses: actions/upload-artifact@v7
         with:
-          name: ComtradeCore-java-ai-linux
-          path: java-package
+          name: ComtradeCore-ai-${{ matrix.name }}
+          path: staging-ai
           if-no-files-found: error
 
   build-test-install:

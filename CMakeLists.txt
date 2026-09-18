@@ -45,6 +45,7 @@ option(COMTRADE_BUILD_EXAMPLES "Build ComtradeCore examples" ${COMTRADE_IS_TOP_L
 option(COMTRADE_BUILD_BENCHMARKS "Build ComtradeCore benchmarks" OFF)
 # --- 新增的多语言绑定选项 ---
 option(BUILD_JAVA_BINDINGS "Build Java bindings using SWIG" OFF)
+option(COMTRADE_BUILD_AI "Build optional C++ AI analysis library and CLI" OFF)
 
 # ==========================================
 # 3. 子目录引入配置
@@ -90,6 +91,10 @@ endif()
 # ==========================================
 # 4. 安装与 CMake package 导出
 # ==========================================
+if(COMTRADE_BUILD_AI)
+    add_subdirectory(analysis/cpp)
+endif()
+
 install(TARGETS ComtradeCore
         EXPORT ComtradeCoreTargets
 )
