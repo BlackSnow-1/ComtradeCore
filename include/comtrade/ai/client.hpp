@@ -89,26 +89,38 @@ inline std::string analyze(const Json &evidence, const Config &config) {
     client.enable_server_hostname_verification(true);
     // Use OpenSSL's RFC-compliant SAN/IP matcher on every platform. cpp-httplib skips IP SAN
     // matching on MinGW and permits CN fallback even when a SAN is present. Acceptance here
-    // requires BOTH trust (a real chain verification against the SSL_CTX's trust store) and
-    // identity (SAN/IP match).
+    // requires BOTH trust (a real chain verification against our own trust store, built the same
+    // way cpp-httplib would) and identity (SAN/IP match).
     //
     // Note this does NOT read SSL_get_verify_result(): as soon as a custom verifier is installed,
     // cpp-httplib's SSLClient::initialize_ssl() unconditionally calls
-    // SSL_set_verify(ssl, SSL_VERIFY_NONE, nullptr) before the handshake, which makes OpenSSL skip
-    // certificate-chain verification entirely — SSL_get_verify_result() then just reads back its
-    // never-written default of X509_V_OK regardless of whether the peer's certificate is actually
-    // trusted, silently defeating this check. The chain must be verified here, explicitly, against
-    // the same trust store cpp-httplib populated via set_ca_cert_path()/the system default paths.
-    client.set_server_certificate_verifier([host = url.host](SSL *ssl) {
+    // SSL_set_verify(ssl, SSL_VERIFY_NONE, nullptr) before the handshake, so that value cannot be
+    // trusted here. We also do not reuse cpp-httplib's own SSL_CTX trust store (via
+    // SSL_CTX_get_cert_store) since its readiness depends on cpp-httplib's internal load_certs()
+    // having already run and succeeded, which this code has no direct way to confirm; building an
+    // independent store from the exact same inputs (caBundle, or else the system default CA paths)
+    // removes that assumption entirely. X509_V_FLAG_X509_STRICT additionally disables legacy
+    // leniency in the chain-building algorithm so a certificate cannot slip through under a relaxed
+    // historical-compatibility profile.
+    client.set_server_certificate_verifier([host = url.host, caBundle = config.caBundle](SSL *ssl) {
         std::unique_ptr<X509, decltype(&X509_free)> cert(SSL_get1_peer_certificate(ssl), X509_free);
         if (!cert)
             return httplib::SSLVerifierResponse::CertificateRejected;
-        X509_STORE *store = SSL_CTX_get_cert_store(SSL_get_SSL_CTX(ssl));
+        std::unique_ptr<X509_STORE, decltype(&X509_STORE_free)> store(X509_STORE_new(), X509_STORE_free);
+        if (!store)
+            return httplib::SSLVerifierResponse::CertificateRejected;
+        bool storeReady = caBundle.empty()
+                              ? X509_STORE_set_default_paths(store.get()) == 1
+                              : X509_STORE_load_locations(store.get(), caBundle.c_str(), nullptr) == 1;
+        if (!storeReady)
+            return httplib::SSLVerifierResponse::CertificateRejected;
         STACK_OF(X509) *chain = SSL_get_peer_cert_chain(ssl);
         std::unique_ptr<X509_STORE_CTX, decltype(&X509_STORE_CTX_free)> verifyCtx(X509_STORE_CTX_new(),
                                                                                   X509_STORE_CTX_free);
-        if (!verifyCtx || X509_STORE_CTX_init(verifyCtx.get(), store, cert.get(), chain) != 1 ||
-            X509_verify_cert(verifyCtx.get()) != 1)
+        if (!verifyCtx || X509_STORE_CTX_init(verifyCtx.get(), store.get(), cert.get(), chain) != 1)
+            return httplib::SSLVerifierResponse::CertificateRejected;
+        X509_VERIFY_PARAM_set_flags(X509_STORE_CTX_get0_param(verifyCtx.get()), X509_V_FLAG_X509_STRICT);
+        if (X509_verify_cert(verifyCtx.get()) != 1)
             return httplib::SSLVerifierResponse::CertificateRejected;
         std::string name = host;
         if (name.front() == '[')
