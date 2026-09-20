@@ -33,6 +33,171 @@ IEEE/IEC C37.111-2013 CFG 支持采样率段、时间倍率、小数秒精度、
 时间质量码和闰秒指示；当 `nrates=0` 时，可读取并保持后续0到任意数量的采样率段。
 下一版 PC37.111 仍在制定中，尚无可据以实现的正式发布版本。
 
+## 生成 COMTRADE 文件
+
+下面的示例生成一组 ASCII 格式的 `record.cfg` 和 `record.dat`：
+
+```cpp
+#include <comtrade/record.hpp>
+
+#include <iostream>
+
+int main() {
+    comtrade::Record record;
+    record.setStationAndDevice(
+        "GRID_01",
+        "RELAY_01",
+        comtrade::StandardVersion::V1999);
+
+    comtrade::AnalogChannel voltage;
+    voltage.index = 1;
+    voltage.id = "VA";
+    voltage.phase = "A";
+    voltage.uu = "V";
+    voltage.a = 0.1;
+    voltage.b = -5.0;
+    record.addAnalogChannel(voltage);
+
+    comtrade::DigitalChannel trip;
+    trip.index = 1;
+    trip.id = "TRIP";
+    record.addDigitalChannel(trip);
+
+    record.addSample(0, {220.0}, {false});
+    record.addSample(250, {221.2}, {true});
+    record.getMutableCfg().data_type = comtrade::DataType::ASCII;
+
+    if (!record.saveCfg("record.cfg") || !record.saveDat("record.dat")) {
+        std::cerr << "生成 COMTRADE 文件失败\n";
+        return 1;
+    }
+}
+```
+
+COMTRADE 记录由同名的配置文件和数据文件组成：
+
+```text
+record.cfg
+record.dat
+```
+
+## 流式读取
+
+`StreamReader` 在构造时必须接收 CFG 路径。CFG 不存在或解析失败时，构造函数会抛出
+`std::runtime_error`。它会读取 CFG 中声明的 DAT 类型，并自动选择 ASCII、BINARY、BINARY32 或
+FLOAT32 解码路径。
+
+```cpp
+#include <comtrade/stream_reader.hpp>
+
+#include <iostream>
+#include <stdexcept>
+
+int main() {
+    try {
+        comtrade::StreamReader reader("record.cfg");
+
+        const auto& cfg = reader.getCfg();
+        std::cout << "站名: " << cfg.station_name << '\n';
+        std::cout << "模拟通道数: " << cfg.analog_count << '\n';
+        std::cout << "数字通道数: " << cfg.digital_count << '\n';
+
+        const std::size_t processed = reader.processDatStream(
+            "record.dat",
+            [](const comtrade::SampleRow& row) {
+                std::cout << "序号: " << row.index
+                          << ", 时间戳: " << row.timestamp_us << " us\n";
+
+                for (std::size_t i = 0; i < row.analog_values.size(); ++i) {
+                    std::cout << "  模拟量[" << i << "]: "
+                              << row.analog_values[i] << '\n';
+                }
+
+                for (std::size_t i = 0; i < row.digital_values.size(); ++i) {
+                    std::cout << "  数字量[" << i << "]: "
+                              << (row.digital_values[i] ? "ON" : "OFF") << '\n';
+                }
+            });
+
+        std::cout << "共处理 " << processed << " 个采样点\n";
+    } catch (const std::runtime_error& error) {
+        std::cerr << "加载 COMTRADE 配置失败: " << error.what() << '\n';
+        return 1;
+    }
+}
+```
+
+Reader 会把 CFG 中的模拟通道系数应用到 DAT 原始值：
+
+```text
+实际值 = 原始值 × a + b
+```
+
+### 多段不同采样率的录波
+
+IEEE C37.111-2013 允许一份录波包含多段不同采样率（`cfg.sample_rates`，每段记录标称采样率和该段
+最后一个物理采样点的累计序号）。逐点流式处理这类录波时，如果只按固定时长分窗口或分批，无法知道
+"这一批点里混进了几种采样率"；`SampleRow` 因此直接带上了两个字段，免去调用方自己按 `end_sample`
+做二分查找：
+
+```cpp
+reader.processDatStream("record.dat", [](const comtrade::SampleRow& row) {
+    // sample_rates 的下标，从 0 开始；没有采样段信息时固定为 0。
+    row.segment_index;
+    // 当前采样点所属采样段的标称采样率（Hz）；没有采样段信息时为 0。
+    row.segment_sample_rate;
+});
+```
+
+`StreamReader` 按物理采样序号（第一个有效点为 1）在 `cfg().sample_rates` 中单调向后定位当前
+采样段：DAT 本身就是严格按序产生的，所以定位游标只会前移，不会倒退，整份文件的定位总代价是
+O(采样段数)，不会随采样点数增长，不影响流式处理原有的常数级内存占用。典型用法是在段切换时结束
+当前批次、按新的 `segment_sample_rate` 重新决定窗口大小或重采样参数，例如：
+
+```cpp
+std::size_t current_segment = 0;
+reader.processDatStream("record.dat", [&](const comtrade::SampleRow& row) {
+    if (row.segment_index != current_segment) {
+        current_segment = row.segment_index;
+        // 在这里结束上一段的处理（比如落盘一个窗口），再按新的 segment_sample_rate 继续。
+    }
+    // ...按当前段处理 row...
+});
+```
+
+### 回调对象的生命周期
+
+为了保持稳定的内存占用，`StreamReader` 会复用同一个 `SampleRow` 缓冲区。不要在回调结束后继续
+持有 `row` 的引用、地址，或者它内部容器的引用。
+
+如果需要长期保存采样点，应在回调中复制：
+
+```cpp
+std::vector<comtrade::SampleRow> rows;
+
+reader.processDatStream("record.dat", [&](const comtrade::SampleRow& row) {
+    rows.push_back(row);
+});
+```
+
+如果只需要实时统计或转发数据，直接在回调中处理可以保持近似恒定的内存占用。
+
+## C++ AI 录波分析（可选）
+
+`include/comtrade/ai.hpp` + `include/comtrade/ai/` 是纯 C++17、**header-only** 的录波摘要、模型
+分析和中文 PDF 报告模块，实现代码单独放在 `ai/` 子目录里，与核心 COMTRADE 读写实现物理分开，
+不含任何需要单独编译的 `.cpp` 实现；`analysis/cpp` 只放获取依赖的 CMake 脚本和使用这些头文件的
+`comtrade-ai` 命令行工具。依赖 cpp-httplib/OpenSSL、nlohmann/json 与 libharu，无 Qt、Java/JNI 依赖。
+默认既不构建也不安装，不增加核心库依赖；是否构建（`COMTRADE_BUILD_AI`）和是否安装
+（`COMTRADE_INSTALL_AI`）是两个独立的 CMake 选项，详见
+[构建、配置与测试说明、每个配置字段的含义和依赖版本](docs/ai-analysis.md)。
+
+```sh
+cmake -S . -B build-ai -DCOMTRADE_BUILD_AI=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build build-ai --config Release --parallel 2
+ctest --test-dir build-ai -C Release --output-on-failure
+```
+
 ## 环境要求
 
 - 支持 C++17 的编译器：GCC、Clang 或 MSVC。
@@ -42,7 +207,7 @@ IEEE/IEC C37.111-2013 CFG 支持采样率段、时间倍率、小数秒精度、
 - Java 绑定为可选组件；构建时还需要 SWIG 4.0 或更高版本、JDK（包含 JNI 头文件）和 Java 编译器。
 - C++ AI 录波分析（`COMTRADE_BUILD_AI`）为可选组件，默认关闭，核心库不受影响；需要 **CMake 3.18
   或更高版本**（高于核心库本身的 3.14）和 OpenSSL 3.0 及以上开发包，其余三个依赖（nlohmann/json、
-  cpp-httplib、libharu）在本机找不到合适版本时会自动联网拉取固定版本，详见文末"C++ AI 录波分析"
+  cpp-httplib、libharu）在本机找不到合适版本时会自动联网拉取固定版本，详见前文"C++ AI 录波分析"
   一节。
 
 ## 安装与集成
@@ -678,7 +843,7 @@ public final class Main {
 
 ### Java 中的 AI 分析（可选）
 
-本仓库的“C++ AI 录波分析”模块（见文末对应章节）同步封装了 Java 接口：`comtrade.ComtradeAI`。它只有在构建
+本仓库的"C++ AI 录波分析"模块（见前文对应章节）同步封装了 Java 接口：`comtrade.ComtradeAI`。它只有在构建
 Java 绑定时**同时**打开 `BUILD_JAVA_BINDINGS=ON` 和 `COMTRADE_BUILD_AI=ON` 才会出现在
 `comtrade-core-java.jar` 里；只打开 `BUILD_JAVA_BINDINGS` 不会让 Java 绑定意外依赖
 nlohmann/json、cpp-httplib、OpenSSL 或 libharu：
@@ -726,155 +891,6 @@ public final class Main {
 是否完整（`requireNetwork=true` 时还会要求 `endpoint`/`model` 有效）。配置字段、安全边界、超时和
 字节预算规则与 C++ 版本完全相同，详见 [docs/ai-analysis.md](docs/ai-analysis.md)。
 
-## 生成 COMTRADE 文件
-
-下面的示例生成一组 ASCII 格式的 `record.cfg` 和 `record.dat`：
-
-```cpp
-#include <comtrade/record.hpp>
-
-#include <iostream>
-
-int main() {
-    comtrade::Record record;
-    record.setStationAndDevice(
-        "GRID_01",
-        "RELAY_01",
-        comtrade::StandardVersion::V1999);
-
-    comtrade::AnalogChannel voltage;
-    voltage.index = 1;
-    voltage.id = "VA";
-    voltage.phase = "A";
-    voltage.uu = "V";
-    voltage.a = 0.1;
-    voltage.b = -5.0;
-    record.addAnalogChannel(voltage);
-
-    comtrade::DigitalChannel trip;
-    trip.index = 1;
-    trip.id = "TRIP";
-    record.addDigitalChannel(trip);
-
-    record.addSample(0, {220.0}, {false});
-    record.addSample(250, {221.2}, {true});
-    record.getMutableCfg().data_type = comtrade::DataType::ASCII;
-
-    if (!record.saveCfg("record.cfg") || !record.saveDat("record.dat")) {
-        std::cerr << "生成 COMTRADE 文件失败\n";
-        return 1;
-    }
-}
-```
-
-COMTRADE 记录由同名的配置文件和数据文件组成：
-
-```text
-record.cfg
-record.dat
-```
-
-## 流式读取
-
-`StreamReader` 在构造时必须接收 CFG 路径。CFG 不存在或解析失败时，构造函数会抛出
-`std::runtime_error`。它会读取 CFG 中声明的 DAT 类型，并自动选择 ASCII、BINARY、BINARY32 或
-FLOAT32 解码路径。
-
-```cpp
-#include <comtrade/stream_reader.hpp>
-
-#include <iostream>
-#include <stdexcept>
-
-int main() {
-    try {
-        comtrade::StreamReader reader("record.cfg");
-
-        const auto& cfg = reader.getCfg();
-        std::cout << "站名: " << cfg.station_name << '\n';
-        std::cout << "模拟通道数: " << cfg.analog_count << '\n';
-        std::cout << "数字通道数: " << cfg.digital_count << '\n';
-
-        const std::size_t processed = reader.processDatStream(
-            "record.dat",
-            [](const comtrade::SampleRow& row) {
-                std::cout << "序号: " << row.index
-                          << ", 时间戳: " << row.timestamp_us << " us\n";
-
-                for (std::size_t i = 0; i < row.analog_values.size(); ++i) {
-                    std::cout << "  模拟量[" << i << "]: "
-                              << row.analog_values[i] << '\n';
-                }
-
-                for (std::size_t i = 0; i < row.digital_values.size(); ++i) {
-                    std::cout << "  数字量[" << i << "]: "
-                              << (row.digital_values[i] ? "ON" : "OFF") << '\n';
-                }
-            });
-
-        std::cout << "共处理 " << processed << " 个采样点\n";
-    } catch (const std::runtime_error& error) {
-        std::cerr << "加载 COMTRADE 配置失败: " << error.what() << '\n';
-        return 1;
-    }
-}
-```
-
-Reader 会把 CFG 中的模拟通道系数应用到 DAT 原始值：
-
-```text
-实际值 = 原始值 × a + b
-```
-
-### 多段不同采样率的录波
-
-IEEE C37.111-2013 允许一份录波包含多段不同采样率（`cfg.sample_rates`，每段记录标称采样率和该段
-最后一个物理采样点的累计序号）。逐点流式处理这类录波时，如果只按固定时长分窗口或分批，无法知道
-"这一批点里混进了几种采样率"；`SampleRow` 因此直接带上了两个字段，免去调用方自己按 `end_sample`
-做二分查找：
-
-```cpp
-reader.processDatStream("record.dat", [](const comtrade::SampleRow& row) {
-    // sample_rates 的下标，从 0 开始；没有采样段信息时固定为 0。
-    row.segment_index;
-    // 当前采样点所属采样段的标称采样率（Hz）；没有采样段信息时为 0。
-    row.segment_sample_rate;
-});
-```
-
-`StreamReader` 按物理采样序号（第一个有效点为 1）在 `cfg().sample_rates` 中单调向后定位当前
-采样段：DAT 本身就是严格按序产生的，所以定位游标只会前移，不会倒退，整份文件的定位总代价是
-O(采样段数)，不会随采样点数增长，不影响流式处理原有的常数级内存占用。典型用法是在段切换时结束
-当前批次、按新的 `segment_sample_rate` 重新决定窗口大小或重采样参数，例如：
-
-```cpp
-std::size_t current_segment = 0;
-reader.processDatStream("record.dat", [&](const comtrade::SampleRow& row) {
-    if (row.segment_index != current_segment) {
-        current_segment = row.segment_index;
-        // 在这里结束上一段的处理（比如落盘一个窗口），再按新的 segment_sample_rate 继续。
-    }
-    // ...按当前段处理 row...
-});
-```
-
-### 回调对象的生命周期
-
-为了保持稳定的内存占用，`StreamReader` 会复用同一个 `SampleRow` 缓冲区。不要在回调结束后继续
-持有 `row` 的引用、地址，或者它内部容器的引用。
-
-如果需要长期保存采样点，应在回调中复制：
-
-```cpp
-std::vector<comtrade::SampleRow> rows;
-
-reader.processDatStream("record.dat", [&](const comtrade::SampleRow& row) {
-    rows.push_back(row);
-});
-```
-
-如果只需要实时统计或转发数据，直接在回调中处理可以保持近似恒定的内存占用。
-
 ## 构建并运行测试
 
 ```bash
@@ -893,67 +909,6 @@ ctest --test-dir build -C Debug --output-on-failure
 ```text
 StreamEngineTest.GeneratesComtradeFilesAndStreamsEverySample
 ```
-
-### 流式读取基准测试结果
-
-以下结果使用 `tests/ComtradeFiles/SIMENS/20191024045947.CFG` 和同名 DAT 文件，
-在 Ubuntu 26.04 LTS 上分别使用 Release 和 Debug 模式连续读取 100 次得到。
-
-测试环境：
-
-| 项目 | 测试平台信息 |
-| --- | --- |
-| 操作系统 | Ubuntu 26.04 LTS (Resolute Raccoon) |
-| CPU 型号 | 12th Gen Intel(R) Core(TM) i5-12400 |
-| CPU 架构 | x86_64 |
-| CPU 核心 / 线程 | 6 核 / 12 线程 |
-| 内存 | 7.0 GiB（测试时可用 5.7 GiB） |
-| 交换空间 | 4.0 GiB |
-| 构建类型 | Release、Debug |
-
-测试结果：
-
-| 指标 | Release | Debug |
-| --- | ---: | ---: |
-| 循环次数 | 100 | 100 |
-| 每轮采样数 | 1740 | 1740 |
-| 总处理采样数 | 174000 | 174000 |
-| 总耗时 | 0.326 s | 1.839 s |
-| 数据吞吐量 | 99.546 MiB/s | 17.644 MiB/s |
-| 采样处理速度 | 533806.786 samples/s | 94616.556 samples/s |
-| 单采样平均耗时 | 1873.337 ns（约 1.873 us） | 10568.975 ns（约 10.569 us） |
-| 校验和 | 189267714606.961 | 189267714606.961 |
-
-数据吞吐量按照基准程序在正式计时区间内处理的 DAT 逻辑字节数计算，不包含 CFG 文件，也不包含
-计时前的一次预热读取：
-
-```text
-总逻辑读取字节数 = DAT 文件大小（bytes）× 循环次数
-总逻辑读取量（MiB） = 总逻辑读取字节数 ÷ 1024 ÷ 1024
-数据吞吐量（MiB/s） = 总逻辑读取量（MiB）÷ 正式循环总耗时（s）
-```
-
-本次 DAT 文件大小为 `340244 bytes`，Release 模式循环 100 次，因此：
-
-```text
-总逻辑读取量 = 340244 × 100 ÷ 1024 ÷ 1024
-              ≈ 32.448 MiB
-
-数据吞吐量 = 32.448 ÷ 0.325962
-           ≈ 99.546 MiB/s
-```
-
-输出中的 `elapsed_seconds=0.326` 只显示三位小数，而吞吐量使用未四舍五入的内部计时值计算，所以直接
-使用显示出来的 `0.326` 反算时会有轻微差异。由于 DAT 在正式计时前已经预热，后续读取通常会命中操作
-系统文件缓存；因此该指标主要反映“读取、文本解析、数值换算和回调消费”的综合速度，不代表存储设备的
-物理顺序读取带宽。
-
-本次结果表明，在上述 Linux x86_64 环境中，流式读取器平均每轮读取 1740 个采样点约需
-3.26 ms（Release）或 18.39 ms（Debug）。Release 的吞吐量约为 Debug 的 5.64 倍，因此性能回归
-比较应使用 Release 构建。两种构建模式得到相同的 `checksum`，说明 benchmark 消费到的结果一致；
-该值用于防止读取结果被编译器无效优化并检查多轮结果是否稳定，不代表 COMTRADE 数据本身的业务含义。
-性能数据会受到 CPU 动态调频、系统负载、编译器版本和存储介质影响，因此应在相同环境和构建类型下
-比较不同版本。
 
 ### GitHub Actions 自动测试
 
@@ -1014,7 +969,7 @@ ComtradeCore/
 │   ├── text_encoding.hpp          # 文本编码转换与 BOM 处理
 │   ├── types.hpp                  # 数据类型和通道定义
 │   ├── utils.hpp                  # 内部工具
-│   ├── ai.hpp                     # AI 模块单一入口（可选，见下文），#include 下面 ai/ 里的头文件
+│   ├── ai.hpp                     # AI 模块单一入口（可选，见前文），#include 下面 ai/ 里的头文件
 │   └── ai/                        # AI 模块实现，与上面的核心读写实现物理分开的独立子目录
 │       ├── config.hpp             # AI 配置：字段校验、fromJson/fromFile
 │       ├── statistics.hpp         # AI 用统计累加器（RMS/均值/极值）
@@ -1046,18 +1001,63 @@ ComtradeCore/
 `build-*`、`install*` 等目录是本地构建或安装时生成的产物，不属于上面的源码结构。
 SWIG 生成的 Java 代理和 C++ JNI 包装代码位于所选构建目录的 `bindings/java/generated/` 下。
 
-## C++ AI 录波分析（可选）
+## 流式读取基准测试结果
 
-`include/comtrade/ai.hpp` + `include/comtrade/ai/` 是纯 C++17、**header-only** 的录波摘要、模型
-分析和中文 PDF 报告模块，实现代码单独放在 `ai/` 子目录里，与核心 COMTRADE 读写实现物理分开，
-不含任何需要单独编译的 `.cpp` 实现；`analysis/cpp` 只放获取依赖的 CMake 脚本和使用这些头文件的
-`comtrade-ai` 命令行工具。依赖 cpp-httplib/OpenSSL、nlohmann/json 与 libharu，无 Qt、Java/JNI 依赖。
-默认既不构建也不安装，不增加核心库依赖；是否构建（`COMTRADE_BUILD_AI`）和是否安装
-（`COMTRADE_INSTALL_AI`）是两个独立的 CMake 选项，详见
-[构建、配置与测试说明、每个配置字段的含义和依赖版本](docs/ai-analysis.md)。
+以下结果使用 `tests/ComtradeFiles/SIMENS/20191024045947.CFG` 和同名 DAT 文件，
+在 Ubuntu 26.04 LTS 上分别使用 Release 和 Debug 模式连续读取 100 次得到。
 
-```sh
-cmake -S . -B build-ai -DCOMTRADE_BUILD_AI=ON -DCMAKE_BUILD_TYPE=Release
-cmake --build build-ai --config Release --parallel 2
-ctest --test-dir build-ai -C Release --output-on-failure
+测试环境：
+
+| 项目 | 测试平台信息 |
+| --- | --- |
+| 操作系统 | Ubuntu 26.04 LTS (Resolute Raccoon) |
+| CPU 型号 | 12th Gen Intel(R) Core(TM) i5-12400 |
+| CPU 架构 | x86_64 |
+| CPU 核心 / 线程 | 6 核 / 12 线程 |
+| 内存 | 7.0 GiB（测试时可用 5.7 GiB） |
+| 交换空间 | 4.0 GiB |
+| 构建类型 | Debug、Release |
+
+测试结果：
+
+| 指标 | Debug | Release |
+| --- | ---: | ---: |
+| 循环次数 | 100 | 100 |
+| 每轮采样数 | 1740 | 1740 |
+| 总处理采样数 | 174000 | 174000 |
+| 总耗时 | 1.839 s | 0.326 s |
+| 数据吞吐量 | 17.644 MiB/s | 99.546 MiB/s |
+| 采样处理速度 | 94616.556 samples/s | 533806.786 samples/s |
+| 单采样平均耗时 | 10568.975 ns（约 10.569 us） | 1873.337 ns（约 1.873 us） |
+| 校验和 | 189267714606.961 | 189267714606.961 |
+
+数据吞吐量按照基准程序在正式计时区间内处理的 DAT 逻辑字节数计算，不包含 CFG 文件，也不包含
+计时前的一次预热读取：
+
+```text
+总逻辑读取字节数 = DAT 文件大小（bytes）× 循环次数
+总逻辑读取量（MiB） = 总逻辑读取字节数 ÷ 1024 ÷ 1024
+数据吞吐量（MiB/s） = 总逻辑读取量（MiB）÷ 正式循环总耗时（s）
 ```
+
+本次 DAT 文件大小为 `340244 bytes`，Release 模式循环 100 次，因此：
+
+```text
+总逻辑读取量 = 340244 × 100 ÷ 1024 ÷ 1024
+              ≈ 32.448 MiB
+
+数据吞吐量 = 32.448 ÷ 0.325962
+           ≈ 99.546 MiB/s
+```
+
+输出中的 `elapsed_seconds=0.326` 只显示三位小数，而吞吐量使用未四舍五入的内部计时值计算，所以直接
+使用显示出来的 `0.326` 反算时会有轻微差异。由于 DAT 在正式计时前已经预热，后续读取通常会命中操作
+系统文件缓存；因此该指标主要反映“读取、文本解析、数值换算和回调消费”的综合速度，不代表存储设备的
+物理顺序读取带宽。
+
+本次结果表明，在上述 Linux x86_64 环境中，流式读取器平均每轮读取 1740 个采样点约需
+3.26 ms（Release）或 18.39 ms（Debug）。Release 的吞吐量约为 Debug 的 5.64 倍，因此性能回归
+比较应使用 Release 构建。两种构建模式得到相同的 `checksum`，说明 benchmark 消费到的结果一致；
+该值用于防止读取结果被编译器无效优化并检查多轮结果是否稳定，不代表 COMTRADE 数据本身的业务含义。
+性能数据会受到 CPU 动态调频、系统负载、编译器版本和存储介质影响，因此应在相同环境和构建类型下
+比较不同版本。
