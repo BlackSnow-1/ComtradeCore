@@ -336,6 +336,23 @@ TEST_F(Fixture, PdfErrorsAndExclusiveOutput) {
 }
 
 TEST_F(Fixture, TlsTrustAndHostnameVerification) {
+    // Temporary diagnostics for a CI-only failure of this exact test: prints the TLS trust
+    // decision (subject/issuer/verify error code) to stderr, visible via
+    // `ctest --output-on-failure`. Harmless if left in: off unless this variable is set.
+#ifdef _WIN32
+    _putenv_s("COMTRADE_AI_TLS_DEBUG", "1");
+#else
+    setenv("COMTRADE_AI_TLS_DEBUG", "1", 1);
+#endif
+    struct ResetDebugEnv {
+        ~ResetDebugEnv() {
+#ifdef _WIN32
+            _putenv_s("COMTRADE_AI_TLS_DEBUG", "");
+#else
+            unsetenv("COMTRADE_AI_TLS_DEBUG");
+#endif
+        }
+    } resetDebugEnv;
     // Generate a short-lived localhost certificate; no external server or credentials.
     std::unique_ptr<EVP_PKEY_CTX, decltype(&EVP_PKEY_CTX_free)> context(
         EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, nullptr), EVP_PKEY_CTX_free);

@@ -16,10 +16,19 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <iostream>
 #include <memory>
 #include <string>
 
 namespace comtrade::ai {
+namespace {
+// Opt-in diagnostics for the TLS trust decision (COMTRADE_AI_TLS_DEBUG=1), written to stderr.
+// Off by default: normal operation never needs it, and it can reveal endpoint/caBundle paths.
+bool tlsDebugEnabled() {
+    const char *v = std::getenv("COMTRADE_AI_TLS_DEBUG");
+    return v && *v && v != std::string("0");
+}
+} // namespace
 
 // Builds the exact JSON body that will be sent to the model, without performing any network I/O.
 // Kept separate from analyze() so callers (and tests) can inspect or byte-budget the request first.
@@ -102,25 +111,53 @@ inline std::string analyze(const Json &evidence, const Config &config) {
     // removes that assumption entirely. X509_V_FLAG_X509_STRICT additionally disables legacy
     // leniency in the chain-building algorithm so a certificate cannot slip through under a relaxed
     // historical-compatibility profile.
-    client.set_server_certificate_verifier([host = url.host, caBundle = config.caBundle](SSL *ssl) {
+    const bool tlsDebug = tlsDebugEnabled();
+    client.set_server_certificate_verifier([host = url.host, caBundle = config.caBundle, tlsDebug](SSL *ssl) {
         std::unique_ptr<X509, decltype(&X509_free)> cert(SSL_get1_peer_certificate(ssl), X509_free);
-        if (!cert)
+        if (!cert) {
+            if (tlsDebug)
+                std::cerr << "[comtrade-ai-tls] no peer certificate presented\n";
             return httplib::SSLVerifierResponse::CertificateRejected;
+        }
+        if (tlsDebug) {
+            std::unique_ptr<char, decltype(&std::free)> subject(
+                X509_NAME_oneline(X509_get_subject_name(cert.get()), nullptr, 0), std::free);
+            std::unique_ptr<char, decltype(&std::free)> issuer(
+                X509_NAME_oneline(X509_get_issuer_name(cert.get()), nullptr, 0), std::free);
+            std::cerr << "[comtrade-ai-tls] host=" << host
+                      << " caBundle=" << (caBundle.empty() ? "(none)" : caBundle)
+                      << " subject=" << (subject ? subject.get() : "?")
+                      << " issuer=" << (issuer ? issuer.get() : "?")
+                      << " self-signed=" << (X509_check_issued(cert.get(), cert.get()) == X509_V_OK) << "\n";
+        }
         std::unique_ptr<X509_STORE, decltype(&X509_STORE_free)> store(X509_STORE_new(), X509_STORE_free);
         if (!store)
             return httplib::SSLVerifierResponse::CertificateRejected;
         bool storeReady = caBundle.empty()
                               ? X509_STORE_set_default_paths(store.get()) == 1
                               : X509_STORE_load_locations(store.get(), caBundle.c_str(), nullptr) == 1;
+        if (tlsDebug)
+            std::cerr << "[comtrade-ai-tls] storeReady=" << storeReady << "\n";
         if (!storeReady)
             return httplib::SSLVerifierResponse::CertificateRejected;
         STACK_OF(X509) *chain = SSL_get_peer_cert_chain(ssl);
+        if (tlsDebug)
+            std::cerr << "[comtrade-ai-tls] peer chain length=" << (chain ? sk_X509_num(chain) : -1) << "\n";
         std::unique_ptr<X509_STORE_CTX, decltype(&X509_STORE_CTX_free)> verifyCtx(X509_STORE_CTX_new(),
                                                                                   X509_STORE_CTX_free);
-        if (!verifyCtx || X509_STORE_CTX_init(verifyCtx.get(), store.get(), cert.get(), chain) != 1)
+        if (!verifyCtx || X509_STORE_CTX_init(verifyCtx.get(), store.get(), cert.get(), chain) != 1) {
+            if (tlsDebug)
+                std::cerr << "[comtrade-ai-tls] X509_STORE_CTX_init failed\n";
             return httplib::SSLVerifierResponse::CertificateRejected;
+        }
         X509_VERIFY_PARAM_set_flags(X509_STORE_CTX_get0_param(verifyCtx.get()), X509_V_FLAG_X509_STRICT);
-        if (X509_verify_cert(verifyCtx.get()) != 1)
+        int verifyResult = X509_verify_cert(verifyCtx.get());
+        if (tlsDebug) {
+            int errorCode = X509_STORE_CTX_get_error(verifyCtx.get());
+            std::cerr << "[comtrade-ai-tls] X509_verify_cert=" << verifyResult << " error=" << errorCode
+                      << " (" << X509_verify_cert_error_string(errorCode) << ")\n";
+        }
+        if (verifyResult != 1)
             return httplib::SSLVerifierResponse::CertificateRejected;
         std::string name = host;
         if (name.front() == '[')
@@ -131,6 +168,8 @@ inline std::string analyze(const Json &evidence, const Config &config) {
                                                ASN1_STRING_length(ip.get()), 0)
                                : X509_check_host(cert.get(), name.c_str(), name.size(),
                                                  X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS, nullptr);
+        if (tlsDebug)
+            std::cerr << "[comtrade-ai-tls] identity match (ip=" << bool(ip) << ")=" << matched << "\n";
         return matched == 1 ? httplib::SSLVerifierResponse::CertificateAccepted
                             : httplib::SSLVerifierResponse::CertificateRejected;
     });
