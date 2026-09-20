@@ -89,12 +89,26 @@ inline std::string analyze(const Json &evidence, const Config &config) {
     client.enable_server_hostname_verification(true);
     // Use OpenSSL's RFC-compliant SAN/IP matcher on every platform. cpp-httplib skips IP SAN
     // matching on MinGW and permits CN fallback even when a SAN is present. Acceptance here
-    // requires BOTH trust (verify_result) and identity (SAN/IP match).
+    // requires BOTH trust (a real chain verification against the SSL_CTX's trust store) and
+    // identity (SAN/IP match).
+    //
+    // Note this does NOT read SSL_get_verify_result(): as soon as a custom verifier is installed,
+    // cpp-httplib's SSLClient::initialize_ssl() unconditionally calls
+    // SSL_set_verify(ssl, SSL_VERIFY_NONE, nullptr) before the handshake, which makes OpenSSL skip
+    // certificate-chain verification entirely — SSL_get_verify_result() then just reads back its
+    // never-written default of X509_V_OK regardless of whether the peer's certificate is actually
+    // trusted, silently defeating this check. The chain must be verified here, explicitly, against
+    // the same trust store cpp-httplib populated via set_ca_cert_path()/the system default paths.
     client.set_server_certificate_verifier([host = url.host](SSL *ssl) {
-        if (SSL_get_verify_result(ssl) != X509_V_OK)
-            return httplib::SSLVerifierResponse::CertificateRejected;
         std::unique_ptr<X509, decltype(&X509_free)> cert(SSL_get1_peer_certificate(ssl), X509_free);
         if (!cert)
+            return httplib::SSLVerifierResponse::CertificateRejected;
+        X509_STORE *store = SSL_CTX_get_cert_store(SSL_get_SSL_CTX(ssl));
+        STACK_OF(X509) *chain = SSL_get_peer_cert_chain(ssl);
+        std::unique_ptr<X509_STORE_CTX, decltype(&X509_STORE_CTX_free)> verifyCtx(X509_STORE_CTX_new(),
+                                                                                  X509_STORE_CTX_free);
+        if (!verifyCtx || X509_STORE_CTX_init(verifyCtx.get(), store, cert.get(), chain) != 1 ||
+            X509_verify_cert(verifyCtx.get()) != 1)
             return httplib::SSLVerifierResponse::CertificateRejected;
         std::string name = host;
         if (name.front() == '[')
