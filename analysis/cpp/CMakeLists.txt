@@ -43,40 +43,17 @@ else()
 endif()
 
 # libharu 2.4.4 (pure C PDF generation, no Qt) — https://github.com/libharu/libharu
-# libharu ships no CMake package config of its own (no `install(EXPORT ...)`), so a plain
-# find_package() cannot locate a system install; find_path()/find_library() is the closest
-# equivalent. Unlike the two dependencies above, ai/pdf.hpp reaches into libharu's *internal*
-# HPDF_FontAttr struct layout as a documented workaround for a ToUnicode CMap bug specific to the
-# 2.4.x line (see the comment in include/comtrade/ai/pdf.hpp) — that is not part of libharu's public
-# API/ABI contract, so a local install is only accepted when its advertised version is also 2.4.x;
-# anything else falls back to fetching the exact pinned build to avoid silently miscompiling against
-# an incompatible internal layout.
-find_path(COMTRADE_HPDF_INCLUDE_DIR NAMES hpdf.h)
-find_library(COMTRADE_HPDF_LIBRARY NAMES hpdf)
-set(COMTRADE_HPDF_LOCAL_USABLE OFF)
-if(COMTRADE_HPDF_INCLUDE_DIR AND COMTRADE_HPDF_LIBRARY)
-    file(STRINGS "${COMTRADE_HPDF_INCLUDE_DIR}/hpdf_version.h" COMTRADE_HPDF_VERSION_H
-        REGEX "HPDF_(MAJOR|MINOR)_VERSION")
-    string(REGEX MATCH "HPDF_MAJOR_VERSION[ \t]+([0-9]+)" _ "${COMTRADE_HPDF_VERSION_H}")
-    set(COMTRADE_HPDF_MAJOR "${CMAKE_MATCH_1}")
-    string(REGEX MATCH "HPDF_MINOR_VERSION[ \t]+([0-9]+)" _ "${COMTRADE_HPDF_VERSION_H}")
-    set(COMTRADE_HPDF_MINOR "${CMAKE_MATCH_1}")
-    if(COMTRADE_HPDF_MAJOR STREQUAL "2" AND COMTRADE_HPDF_MINOR STREQUAL "4")
-        set(COMTRADE_HPDF_LOCAL_USABLE ON)
-    else()
-        message(STATUS "ComtradeCore AI: found libharu ${COMTRADE_HPDF_MAJOR}.${COMTRADE_HPDF_MINOR} at "
-            "${COMTRADE_HPDF_LIBRARY}, but only the 2.4.x line is ABI-compatible with the internal "
-            "font structures this module touches; ignoring it.")
-    endif()
-endif()
-if(COMTRADE_HPDF_LOCAL_USABLE)
+# See cmake/ComtradeFindHpdf.cmake for why the lookup only accepts the 2.4.x line, and why this
+# exact same logic must also run again in cmake/ComtradeCoreConfig.cmake.in for a downstream
+# find_package(ComtradeCore COMPONENTS AI) consumer when this branch (rather than the fetch fallback
+# below) is the one that produced the install being consumed.
+include(${CMAKE_SOURCE_DIR}/cmake/ComtradeFindHpdf.cmake)
+comtrade_find_hpdf()
+if(COMTRADE_HPDF_FOUND)
     message(STATUS "ComtradeCore AI: found local libharu 2.4 at ${COMTRADE_HPDF_LIBRARY}, using it.")
-    if(NOT TARGET hpdf)
-        add_library(hpdf UNKNOWN IMPORTED)
-        set_target_properties(hpdf PROPERTIES
-            IMPORTED_LOCATION "${COMTRADE_HPDF_LIBRARY}"
-            INTERFACE_INCLUDE_DIRECTORIES "${COMTRADE_HPDF_INCLUDE_DIR}")
-    endif()
+    # Consumed by configure_package_config_file() below so the installed ComtradeCoreConfig.cmake
+    # knows whether it must re-resolve `hpdf` itself (see cmake/ComtradeCoreConfig.cmake.in).
+    set(COMTRADE_AI_PDF_FETCHED OFF PARENT_SCOPE)
 else()
     message(STATUS "ComtradeCore AI: no ABI-compatible local libharu 2.4.x found. Fetching v2.4.4 from GitHub...")
     # Keep it isolated from the rest of the header-only core: build it as a static library with its
@@ -90,6 +67,7 @@ else()
         GIT_TAG 0c598becaadaef8e3d12b883f9fc2864a118c12d) # v2.4.4
     FetchContent_MakeAvailable(ai_pdf)
     set(COMTRADE_AI_PDF_FETCHED ON)
+    set(COMTRADE_AI_PDF_FETCHED ON PARENT_SCOPE)
 endif()
 
 # ComtradeAI is header-only (include/comtrade/ai.hpp + include/comtrade/ai/*.hpp, physically
@@ -139,6 +117,9 @@ if(COMTRADE_INSTALL_AI)
             ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
     endif()
     install(EXPORT ComtradeAITargets NAMESPACE comtrade:: DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ComtradeCore)
+    # Needed by the installed ComtradeCoreConfig.cmake when this build found (rather than fetched)
+    # libharu: it must be able to re-run the exact same lookup on the consumer's machine.
+    install(FILES ${CMAKE_SOURCE_DIR}/cmake/ComtradeFindHpdf.cmake DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ComtradeCore)
 
     # AI 头文件单独安装：include/comtrade/ai.hpp（入口）与整个 include/comtrade/ai/ 子目录，
     # 与核心头文件的安装规则（顶层 CMakeLists.txt）完全分开。

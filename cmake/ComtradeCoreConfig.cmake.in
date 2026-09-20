@@ -9,9 +9,25 @@ include("${CMAKE_CURRENT_LIST_DIR}/ComtradeCoreTargets.cmake")
 if("AI" IN_LIST ComtradeCore_FIND_COMPONENTS)
     if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/ComtradeAITargets.cmake")
         find_dependency(nlohmann_json 3.12)
-        find_dependency(httplib)
+        find_dependency(httplib 0.28)
         find_dependency(OpenSSL 3.0)
         find_dependency(Threads)
+        # @COMTRADE_AI_PDF_FETCHED@ is baked in at the time ComtradeCore itself was built (see
+        # analysis/cpp/CMakeLists.txt): ON means comtrade::hpdf was built and exported by us and is
+        # already fully self-contained via ComtradeAITargets.cmake below. OFF/blank means that build
+        # instead found libharu on ITS machine, and since CMake cannot export an IMPORTED target,
+        # comtrade::ComtradeAI's link interface references a bare, un-namespaced `hpdf` that only
+        # resolves if a target by that exact name also exists here — so re-resolve it the same way,
+        # on this machine, before pulling in ComtradeAITargets.cmake.
+        if(NOT "@COMTRADE_AI_PDF_FETCHED@")
+            include("${CMAKE_CURRENT_LIST_DIR}/ComtradeFindHpdf.cmake")
+            comtrade_find_hpdf()
+            if(NOT COMTRADE_HPDF_FOUND)
+                message(FATAL_ERROR "ComtradeCore AI component was built against a local libharu "
+                    "2.4.x; this machine needs one too (hpdf.h / hpdf on the default search paths) "
+                    "to link comtrade::ComtradeAI.")
+            endif()
+        endif()
         include("${CMAKE_CURRENT_LIST_DIR}/ComtradeAITargets.cmake")
         set(ComtradeCore_AI_FOUND TRUE)
         # Points a consuming project at the installed example configuration (see
