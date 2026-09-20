@@ -65,12 +65,16 @@ jobs:
           "OPENSSL_ROOT_DIR=$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows" >> $env:GITHUB_ENV
           "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin" >> $env:GITHUB_PATH
       - name: Configure C++ AI
+        # On Windows this runs under pwsh (the runner's default shell; no `shell:` override
+        # here), which type-infers an unquoted major.minor-looking token like 3.10 as a version
+        # number and can silently truncate it to "3" plus a stray ".10" argument. Quoting the
+        # value keeps it a plain string on every shell.
         run: >-
           cmake -S . -B build-ai ${{ matrix.compiler }}
           -DCMAKE_BUILD_TYPE=Release -DCOMTRADE_BUILD_AI=ON
           -DCOMTRADE_BUILD_TESTS=ON -DCOMTRADE_BUILD_EXAMPLES=OFF
           -DCMAKE_DISABLE_FIND_PACKAGE_GTest=ON
-          -DCMAKE_POLICY_VERSION_MINIMUM=3.10
+          "-DCMAKE_POLICY_VERSION_MINIMUM=3.10"
           -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/staging-ai"
       - run: cmake --build build-ai --config Release --parallel 2
       - name: Unit and local HTTP/PDF integration tests
