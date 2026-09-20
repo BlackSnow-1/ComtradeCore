@@ -164,10 +164,17 @@ inline std::string analyze(const Json &evidence, const Config &config) {
             name = name.substr(1, name.size() - 2);
         std::unique_ptr<ASN1_OCTET_STRING, decltype(&ASN1_OCTET_STRING_free)> ip(
             a2i_IPADDRESS(name.c_str()), ASN1_OCTET_STRING_free);
+        // X509_CHECK_FLAG_NEVER_CHECK_SUBJECT disables X509_check_host()'s legacy fallback to the
+        // certificate's Subject Common Name when it has no dNSName SAN entries at all (RFC 6125
+        // deprecates CN-based matching). Without it, a certificate whose only SAN is an IP address
+        // (like the one this module accepts for IP endpoints) would still match a hostname equal to
+        // its CN even though it never claims to support that hostname.
         const int matched = ip ? X509_check_ip(cert.get(), ASN1_STRING_get0_data(ip.get()),
                                                ASN1_STRING_length(ip.get()), 0)
                                : X509_check_host(cert.get(), name.c_str(), name.size(),
-                                                 X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS, nullptr);
+                                                 X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS |
+                                                     X509_CHECK_FLAG_NEVER_CHECK_SUBJECT,
+                                                 nullptr);
         if (tlsDebug)
             std::cerr << "[comtrade-ai-tls] identity match (ip=" << bool(ip) << ")=" << matched << "\n";
         return matched == 1 ? httplib::SSLVerifierResponse::CertificateAccepted
