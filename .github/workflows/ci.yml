@@ -77,7 +77,7 @@ jobs:
         run: ctest --test-dir build-ai -C Release -L ai --output-on-failure --output-junit ai-tests.xml
       - name: Verify Chinese PDF text, pagination and rendering
         if: runner.os == 'Linux'
-        run: python3 analysis/cpp/tests/verify_pdf.py build-ai/analysis/cpp/ai-test-artifacts/EndToEndChinesePdf/report.pdf
+        run: python3 tests/verify_pdf.py build-ai/tests/ai-test-artifacts/EndToEndChinesePdf/report.pdf
       - run: cmake --install build-ai --config Release
       - name: Configure installed AI consumer
         run: >-
@@ -95,7 +95,7 @@ jobs:
           name: cpp-ai-results-${{ matrix.name }}
           path: |
             build-ai/ai-tests.xml
-            build-ai/analysis/cpp/ai-test-artifacts
+            build-ai/tests/ai-test-artifacts
       - uses: actions/upload-artifact@v7
         with:
           name: ComtradeCore-ai-${{ matrix.name }}

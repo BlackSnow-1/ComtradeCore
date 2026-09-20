@@ -1,6 +1,6 @@
 #include <cmath>
 #include <comtrade/ai.hpp>
-#include <comtrade/ai_statistics.hpp>
+#include <comtrade/ai/statistics.hpp>
 int main() {
     auto c = comtrade::ai::Config::fromJson(
         {{"model", "integration"}, {"endpoint", "https://example.invalid/v1/chat/completions"}});

@@ -2,7 +2,7 @@
 #include <httplib.h>
 // clang-format on
 #include <comtrade/ai.hpp>
-#include <comtrade/ai_statistics.hpp>
+#include <comtrade/ai/statistics.hpp>
 #include <comtrade/record.hpp>
 #include <comtrade/stream_writer.hpp>
 #include <gtest/gtest.h>

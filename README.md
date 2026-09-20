@@ -667,6 +667,56 @@ public final class Main {
 `reader.getDataType()` 可用于记录或校验实际编码；四种 DAT 类型使用相同的回调数据结构，回调中的
 模拟量已经应用 CFG 的 `a`、`b` 系数，数字量已经从二进制状态字展开。
 
+### Java 中的 AI 分析（可选）
+
+本仓库的“C++ AI 录波分析”模块（见文末对应章节）同步封装了 Java 接口：`comtrade.ComtradeAI`。它只有在构建
+Java 绑定时**同时**打开 `BUILD_JAVA_BINDINGS=ON` 和 `COMTRADE_BUILD_AI=ON` 才会出现在
+`comtrade-core-java.jar` 里；只打开 `BUILD_JAVA_BINDINGS` 不会让 Java 绑定意外依赖
+nlohmann/json、cpp-httplib、OpenSSL 或 libharu：
+
+```bash
+cmake -S . -B build-java-ai \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_JAVA_BINDINGS=ON \
+  -DCOMTRADE_BUILD_AI=ON \
+  -DCOMTRADE_BUILD_TESTS=OFF \
+  -DCOMTRADE_BUILD_EXAMPLES=OFF \
+  -DCMAKE_INSTALL_PREFIX=/path/to/comtrade-install
+
+cmake --build build-java-ai --config Release
+cmake --install build-java-ai --config Release
+```
+
+`comtrade.ComtradeAI` 的每个方法都直接收发 JSON 字符串，和 `comtrade-ai` 命令行工具的文件式用法
+完全一致：`configJson` 就是 `config/ai-config.example.json` 里那份配置的 JSON 文本，
+`evidenceJson` 就是 `summarize()` 返回的 JSON 文本。所有方法都是静态方法，没有需要关闭的原生对象：
+
+```java
+package org.example;
+
+import comtrade.ComtradeAI;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+
+public final class Main {
+    public static void main(String[] args) throws Exception {
+        String configJson = Files.readString(Path.of("ai-config.json"));
+
+        // 仅本地汇总，不访问网络。
+        String evidenceJson = ComtradeAI.summarize("sample.cfg", "sample.dat", configJson);
+
+        // 调用配置的模型，再生成中文 PDF 报告。
+        String interpretation = ComtradeAI.analyze(evidenceJson, configJson);
+        ComtradeAI.exportPdf("report.pdf", evidenceJson, interpretation, configJson);
+    }
+}
+```
+
+`ComtradeAI.validateConfig(configJson, requireNetwork)` 可以在调用 `analyze()` 之前单独校验配置
+是否完整（`requireNetwork=true` 时还会要求 `endpoint`/`model` 有效）。配置字段、安全边界、超时和
+字节预算规则与 C++ 版本完全相同，详见 [docs/ai-analysis.md](docs/ai-analysis.md)。
+
 ## 生成 COMTRADE 文件
 
 下面的示例生成一组 ASCII 格式的 `record.cfg` 和 `record.dat`：
@@ -765,6 +815,38 @@ Reader 会把 CFG 中的模拟通道系数应用到 DAT 原始值：
 
 ```text
 实际值 = 原始值 × a + b
+```
+
+### 多段不同采样率的录波
+
+IEEE C37.111-2013 允许一份录波包含多段不同采样率（`cfg.sample_rates`，每段记录标称采样率和该段
+最后一个物理采样点的累计序号）。逐点流式处理这类录波时，如果只按固定时长分窗口或分批，无法知道
+"这一批点里混进了几种采样率"；`SampleRow` 因此直接带上了两个字段，免去调用方自己按 `end_sample`
+做二分查找：
+
+```cpp
+reader.processDatStream("record.dat", [](const comtrade::SampleRow& row) {
+    // sample_rates 的下标，从 0 开始；没有采样段信息时固定为 0。
+    row.segment_index;
+    // 当前采样点所属采样段的标称采样率（Hz）；没有采样段信息时为 0。
+    row.segment_sample_rate;
+});
+```
+
+`StreamReader` 按物理采样序号（第一个有效点为 1）在 `cfg().sample_rates` 中单调向后定位当前
+采样段：DAT 本身就是严格按序产生的，所以定位游标只会前移，不会倒退，整份文件的定位总代价是
+O(采样段数)，不会随采样点数增长，不影响流式处理原有的常数级内存占用。典型用法是在段切换时结束
+当前批次、按新的 `segment_sample_rate` 重新决定窗口大小或重采样参数，例如：
+
+```cpp
+std::size_t current_segment = 0;
+reader.processDatStream("record.dat", [&](const comtrade::SampleRow& row) {
+    if (row.segment_index != current_segment) {
+        current_segment = row.segment_index;
+        // 在这里结束上一段的处理（比如落盘一个窗口），再按新的 segment_sample_rate 继续。
+    }
+    // ...按当前段处理 row...
+});
 ```
 
 ### 回调对象的生命周期
@@ -895,10 +977,12 @@ ComtradeCore/
 │   ├── CMakeLists.txt             # JNI 动态库与 JAR 构建、安装
 │   ├── comtrade.i                 # SWIG 接口与映射配置
 │   ├── java_api.hpp               # Java 绑定的 C++ 适配层
+│   ├── ai_java_api.hpp            # AI 模块的 Java 适配层（可选，随 COMTRADE_BUILD_AI 一起启用）
 │   └── src/main/java/comtrade/
 │       ├── ComtradeRecord.java
 │       ├── ComtradeStreamReader.java
-│       └── ComtradeStreamWriter.java
+│       ├── ComtradeStreamWriter.java
+│       └── ComtradeAI.java        # 可选：只在启用 AI 模块时随 JAR 一起构建
 ├── cmake/
 │   └── ComtradeCoreConfig.cmake.in # CMake package 配置模板
 ├── docs/
@@ -916,14 +1000,29 @@ ComtradeCore/
 │   ├── stream_writer.hpp          # 流式写入
 │   ├── text_encoding.hpp          # 文本编码转换与 BOM 处理
 │   ├── types.hpp                  # 数据类型和通道定义
-│   └── utils.hpp                  # 内部工具
+│   ├── utils.hpp                  # 内部工具
+│   ├── ai.hpp                     # AI 模块单一入口（可选，见下文），#include 下面 ai/ 里的头文件
+│   └── ai/                        # AI 模块实现，与上面的核心读写实现物理分开的独立子目录
+│       ├── config.hpp             # AI 配置：字段校验、fromJson/fromFile
+│       ├── statistics.hpp         # AI 用统计累加器（RMS/均值/极值）
+│       ├── evidence.hpp           # 本地 CFG/DAT 摘要为证据 JSON
+│       ├── client.hpp             # HTTPS 调用 Chat Completions 模型
+│       ├── pdf.hpp                # 中文 PDF 报告渲染
+│       └── detail.hpp             # AI 模块内部工具，非公开 API
+├── analysis/cpp/
+│   ├── CMakeLists.txt             # AI 依赖获取、comtrade::ComtradeAI/CLI 定义、AI 专属安装规则
+│   └── src/main.cpp               # comtrade-ai 命令行工具（使用 include/comtrade/ai.hpp）
+├── config/
+│   └── ai-config.example.json     # AI 模块配置示例
 ├── tests/
 │   ├── ComtradeFiles/             # 真实 COMTRADE 测试数据
 │   ├── CMakeLists.txt
 │   ├── README.md                  # 测试与基准方法说明
 │   ├── test_real_files.cpp        # 真实文件兼容性测试
 │   ├── test_record.cpp            # 内存记录测试
-│   └── test_stream.cpp            # 流式读写测试
+│   ├── test_stream.cpp            # 流式读写测试
+│   ├── test_ai.cpp                # AI 模块 GoogleTest 单测（可选，随 COMTRADE_BUILD_AI 构建）
+│   └── verify_pdf.py              # 用 Poppler 独立校验 AI 生成的中文 PDF
 ├── .gitattributes
 ├── .gitignore
 ├── CMakeLists.txt                 # 顶层构建与安装配置
@@ -936,9 +1035,13 @@ SWIG 生成的 Java 代理和 C++ JNI 包装代码位于所选构建目录的 `b
 
 ## C++ AI 录波分析（可选）
 
-`analysis/cpp` 提供 C++17 实现的录波摘要、完整波形模型分析和中文 PDF 报告。
-使用 cpp-httplib/OpenSSL、nlohmann/json 与 libharu，无 Qt、Java/JNI 依赖。
-默认关闭，不增加核心库依赖。详见 [构建、配置与测试说明](docs/ai-analysis.md)。
+`include/comtrade/ai.hpp` + `include/comtrade/ai/` 是纯 C++17、**header-only** 的录波摘要、模型
+分析和中文 PDF 报告模块，实现代码单独放在 `ai/` 子目录里，与核心 COMTRADE 读写实现物理分开，
+不含任何需要单独编译的 `.cpp` 实现；`analysis/cpp` 只放获取依赖的 CMake 脚本和使用这些头文件的
+`comtrade-ai` 命令行工具。依赖 cpp-httplib/OpenSSL、nlohmann/json 与 libharu，无 Qt、Java/JNI 依赖。
+默认既不构建也不安装，不增加核心库依赖；是否构建（`COMTRADE_BUILD_AI`）和是否安装
+（`COMTRADE_INSTALL_AI`）是两个独立的 CMake 选项，详见
+[构建、配置与测试说明、每个配置字段的含义和依赖版本](docs/ai-analysis.md)。
 
 ```sh
 cmake -S . -B build-ai -DCOMTRADE_BUILD_AI=ON -DCMAKE_BUILD_TYPE=Release

@@ -1,6 +1,9 @@
 # 1. 扫描 tests 目录下的所有 cpp 文件
 file(GLOB_RECURSE TEST_SOURCES CONFIGURE_DEPENDS "*.cpp")
 list(FILTER TEST_SOURCES EXCLUDE REGEX "test_real_files\\.cpp$")
+# test_ai.cpp 需要 comtrade::ComtradeAI（json/httplib/OpenSSL/libharu），单独在下面按
+# COMTRADE_BUILD_AI 构建，不能混进只依赖 comtrade::ComtradeCore 的主测试目标。
+list(FILTER TEST_SOURCES EXCLUDE REGEX "test_ai\\.cpp$")
 
 # 2. 只有当确实找到了测试文件时，才创建可执行目标
 if(TEST_SOURCES)
@@ -36,4 +39,27 @@ if(EXISTS "${COMTRADE_REAL_FILE_TEST}")
     gtest_discover_tests(comtrade_accuracy_tests
             PROPERTIES LABELS "accuracy"
     )
+endif()
+
+# AI 模块的 GoogleTest 单测：只在 COMTRADE_BUILD_AI 打开、comtrade::ComtradeAI 已由
+# analysis/cpp 定义时构建，覆盖统计、配置校验、HTTP 请求/响应、TLS 校验和中文 PDF 报告。
+set(COMTRADE_AI_TEST "${CMAKE_CURRENT_SOURCE_DIR}/test_ai.cpp")
+if(COMTRADE_BUILD_AI AND TARGET comtrade::ComtradeAI AND EXISTS "${COMTRADE_AI_TEST}")
+    add_executable(comtrade_ai_tests "${COMTRADE_AI_TEST}")
+    target_link_libraries(comtrade_ai_tests PRIVATE
+            comtrade::ComtradeAI
+            GTest::gtest
+            GTest::gtest_main
+    )
+    if(WIN32)
+        target_link_libraries(comtrade_ai_tests PRIVATE ws2_32 crypt32)
+    endif()
+    if(MSVC)
+        target_compile_options(comtrade_ai_tests PRIVATE /utf-8)
+    endif()
+
+    include(GoogleTest)
+    gtest_discover_tests(comtrade_ai_tests PROPERTIES LABELS "ai;integration" TIMEOUT 90)
+
+    message(STATUS "ComtradeCore: AI unit tests enabled.")
 endif()

@@ -46,10 +46,20 @@ option(COMTRADE_BUILD_BENCHMARKS "Build ComtradeCore benchmarks" OFF)
 # --- 新增的多语言绑定选项 ---
 option(BUILD_JAVA_BINDINGS "Build Java bindings using SWIG" OFF)
 option(COMTRADE_BUILD_AI "Build optional C++ AI analysis library and CLI" OFF)
+# 只在 COMTRADE_BUILD_AI=ON 时生效：是否把 AI 模块（include/comtrade/ai/、comtrade-ai CLI、
+# 第三方依赖 license）纳入 `cmake --install`。关闭时仍会构建并测试 AI 模块，只是不安装它，
+# 用于只想在本地构建/跑测试、但发布包不希望携带 AI 及其依赖头文件的场景。
+option(COMTRADE_INSTALL_AI "Install the optional AI module (headers, CLI, licenses) when COMTRADE_BUILD_AI is ON" ON)
 
 # ==========================================
 # 3. 子目录引入配置
 # ==========================================
+# AI 模块（如果启用）必须先于 tests 加入：tests/CMakeLists.txt 里的 AI 单测目标要链接
+# comtrade::ComtradeAI，该 target 由 analysis/cpp 定义。
+if(COMTRADE_BUILD_AI)
+    add_subdirectory(analysis/cpp)
+endif()
+
 if(COMTRADE_BUILD_TESTS)
     enable_testing()
 
@@ -91,16 +101,17 @@ endif()
 # ==========================================
 # 4. 安装与 CMake package 导出
 # ==========================================
-if(COMTRADE_BUILD_AI)
-    add_subdirectory(analysis/cpp)
-endif()
 
 install(TARGETS ComtradeCore
         EXPORT ComtradeCoreTargets
 )
 
+# AI 模块的头文件（include/comtrade/ai.hpp 和 include/comtrade/ai/）物理上单独放在自己的
+# 子目录里，安装与否由 analysis/cpp/CMakeLists.txt 按 COMTRADE_BUILD_AI/COMTRADE_INSTALL_AI
+# 单独控制，这里的核心库安装规则不涉及它们。
 install(DIRECTORY include/
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        REGEX "/comtrade/ai($|\\.hpp|/.*)$" EXCLUDE
 )
 
 install(EXPORT ComtradeCoreTargets

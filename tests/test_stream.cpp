@@ -590,6 +590,52 @@ namespace {
         ASSERT_EQ(roundtrip_reader.getCfg().sample_rates.size(), 3U);
     }
 
+    TEST_F(StreamEngineTest, MultiRateSegmentsExposeSegmentIndexAndRateWhileStreaming) {
+        // 三段采样率 1000/2000/4000 Hz，边界分别在物理采样点 2、6、10（累计序号，1 起）。
+        auto cfg = makeCfg(comtrade::DataType::ASCII, 1, 0);
+        cfg.sample_rates = {{1000.0, 2}, {2000.0, 6}, {4000.0, 10}};
+        saveCfg(cfg_path_, cfg);
+
+        comtrade::StreamWriter writer(cfg);
+        ASSERT_TRUE(writer.open(dat_path_.string()));
+        for (uint32_t i = 0; i < 10; ++i)
+            writer.pushRow(i * 100, {double(i)}, {});
+        writer.close();
+
+        const comtrade::StreamReader reader(cfg_path_.string());
+        std::vector<std::size_t> segment_indices;
+        std::vector<double> segment_rates;
+        const auto processed = reader.processDatStream(dat_path_.string(), [&](const comtrade::SampleRow& row) {
+            segment_indices.push_back(row.segment_index);
+            segment_rates.push_back(row.segment_sample_rate);
+        });
+
+        ASSERT_EQ(processed, 10U);
+        const std::vector<std::size_t> expected_segments{0, 0, 1, 1, 1, 1, 2, 2, 2, 2};
+        EXPECT_EQ(segment_indices, expected_segments);
+        for (std::size_t i = 0; i < segment_rates.size(); ++i)
+            EXPECT_DOUBLE_EQ(segment_rates[i], cfg.sample_rates[segment_indices[i]].samples_per_second);
+    }
+
+    TEST_F(StreamEngineTest, NoSampleRateSegmentsLeaveSegmentFieldsAtDefault) {
+        // 没有采样段信息（sample_rates 为空）时，两个字段保持默认值 0，不做任何猜测。
+        auto cfg = makeCfg(comtrade::DataType::ASCII, 1, 0);
+        ASSERT_TRUE(cfg.sample_rates.empty());
+        saveCfg(cfg_path_, cfg);
+
+        comtrade::StreamWriter writer(cfg);
+        ASSERT_TRUE(writer.open(dat_path_.string()));
+        writer.pushRow(0, {1.0}, {});
+        writer.close();
+
+        const comtrade::StreamReader reader(cfg_path_.string());
+        std::vector<comtrade::SampleRow> rows;
+        ASSERT_EQ(reader.processDatStream(dat_path_.string(), [&](const auto& row) { rows.push_back(row); }), 1U);
+        ASSERT_EQ(rows.size(), 1U);
+        EXPECT_EQ(rows[0].segment_index, 0U);
+        EXPECT_DOUBLE_EQ(rows[0].segment_sample_rate, 0.0);
+    }
+
     TEST_F(StreamEngineTest, Comtrade2013CfgPreservesPreciseTimeMetadata) {
         // 覆盖 2013 专有尾部字段、9 位小数秒以及小于 1 微秒的 TIMEMULT。
         comtrade::Record generated_record;

@@ -33,6 +33,12 @@ struct SampleRow {
     TimePoint absolute_time{};
     std::vector<double> analog_values;
     std::vector<bool> digital_values;
+    // 2013 版允许 nrates=0 后跟任意数量的采样段，每段可以有不同的采样率；这两个字段
+    // 让调用方在流式回调里直接知道"当前点属于哪一段、这段标称多少赫兹"，不必自己按
+    // cfg().sample_rates 的 end_sample 做二分查找。segment_index 是 sample_rates 的下标，
+    // 从 0 开始；sample_rates 为空（无采样段信息）时两个字段都保持默认值 0。
+    std::size_t segment_index = 0;
+    double segment_sample_rate = 0.0;
 };
 
 // StreamReader 在构造时固定一份 CFG 快照，之后可用它重复流式处理同格式 DAT。
@@ -75,6 +81,21 @@ public:
     }
 
 private:
+    // 按物理采样序号（第一个有效采样点为 1）在 sample_rates 中定位当前采样段。DAT 严格按序
+    // 流式产生，序号只会单调增加，因此 cursor 只需单向前移；整份文件的定位总代价是
+    // O(采样段数)，不会随采样点数增长，保持流式处理原有的常数级内存和线性时间特征。
+    void updateSegment(SampleRow& row, std::size_t& cursor, uint64_t physical_ordinal) const {
+        if (cfg_.sample_rates.empty()) {
+            row.segment_index = 0;
+            row.segment_sample_rate = 0.0;
+            return;
+        }
+        while (cursor + 1 < cfg_.sample_rates.size() && physical_ordinal > cfg_.sample_rates[cursor].end_sample)
+            ++cursor;
+        row.segment_index = cursor;
+        row.segment_sample_rate = cfg_.sample_rates[cursor].samples_per_second;
+    }
+
     bool populateTimeFields(SampleRow& row) const {
         // TIMEMULT 表示每个原始时间单位对应的微秒数；先转纳秒可保留小数微秒。
         const long double offset_ns = static_cast<long double>(row.raw_timestamp) *
@@ -95,6 +116,7 @@ private:
                            SampleRow& row_buffer,
                            const std::function<void(const SampleRow&)>& on_row_parsed) const {
         size_t parsed_count = 0;
+        std::size_t segment_cursor = 0;
         std::string line;
         bool first_line = true;
         while (std::getline(dat_file, line)) {
@@ -135,6 +157,7 @@ private:
                 continue;
             }
 
+            updateSegment(row_buffer, segment_cursor, uint64_t(parsed_count) + 1U);
             on_row_parsed(row_buffer);
             ++parsed_count;
         }
@@ -151,6 +174,7 @@ private:
         std::vector<char> encoded_row(row_size);
 
         size_t parsed_count = 0;
+        std::size_t segment_cursor = 0;
         while (dat_file.read(encoded_row.data(), static_cast<std::streamsize>(encoded_row.size()))) {
             const char* cursor = encoded_row.data();
             row_buffer.index = detail::readUint32LittleEndian(cursor);
@@ -184,6 +208,7 @@ private:
                 }
             }
 
+            updateSegment(row_buffer, segment_cursor, uint64_t(parsed_count) + 1U);
             on_row_parsed(row_buffer);
             ++parsed_count;
         }

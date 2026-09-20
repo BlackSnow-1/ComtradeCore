@@ -1,39 +1,50 @@
+/**
+ * @file evidence.hpp
+ * @brief Builds a local, privacy-conscious measurement summary from a COMTRADE record: this is the
+ *        "evidence" JSON that client.hpp sends to a model and pdf.hpp appends to the report. No
+ *        network access here; summarize() only reads the CFG/DAT pair through comtrade::StreamReader.
+ */
+#pragma once
+
+#include "config.hpp"
+#include "detail.hpp"
+#include "statistics.hpp"
+
+#include "../stream_reader.hpp"
+
 #include <array>
-#include <comtrade/ai.hpp>
-#include <comtrade/ai_statistics.hpp>
-#include <comtrade/stream_reader.hpp>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <limits>
 #include <memory>
 #include <openssl/evp.h>
 #include <sstream>
+#include <vector>
 
 namespace comtrade::ai {
 namespace {
-void require(bool ok, const char *message) {
-    if (!ok)
-        throw std::runtime_error(message);
-}
-std::string hash(const std::filesystem::path &path) {
+
+std::string sha256(const std::filesystem::path &path) {
     std::ifstream file(path, std::ios::binary);
-    require(bool(file), "Cannot read input file");
+    detail::require(bool(file), "Cannot read input file");
     std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)> ctx(EVP_MD_CTX_new(), EVP_MD_CTX_free);
-    require(ctx && EVP_DigestInit_ex(ctx.get(), EVP_sha256(), nullptr) == 1, "Cannot initialize SHA256");
+    detail::require(ctx && EVP_DigestInit_ex(ctx.get(), EVP_sha256(), nullptr) == 1, "Cannot initialize SHA256");
     std::array<char, 65536> block{};
     while (file.read(block.data(), block.size()) || file.gcount())
-        require(EVP_DigestUpdate(ctx.get(), block.data(), size_t(file.gcount())) == 1,
-                "SHA256 update failed");
-    require(file.eof(), "Input read failed");
+        detail::require(EVP_DigestUpdate(ctx.get(), block.data(), size_t(file.gcount())) == 1,
+                        "SHA256 update failed");
+    detail::require(file.eof(), "Input read failed");
     unsigned char digest[EVP_MAX_MD_SIZE];
     unsigned length = 0;
-    require(EVP_DigestFinal_ex(ctx.get(), digest, &length) == 1, "SHA256 failed");
+    detail::require(EVP_DigestFinal_ex(ctx.get(), digest, &length) == 1, "SHA256 failed");
     std::ostringstream out;
     out << std::hex << std::setfill('0');
     for (unsigned i = 0; i < length; ++i)
         out << std::setw(2) << unsigned(digest[i]);
     return out.str();
 }
+
 Json statsJson(const std::vector<Statistics> &stats) {
     auto out = Json::array();
     for (const auto &s : stats) {
@@ -50,20 +61,22 @@ Json statsJson(const std::vector<Statistics> &stats) {
     }
     return out;
 }
+
 struct Window {
     std::int64_t first, last;
     std::vector<Statistics> stats;
 };
+
 std::int64_t physicalRows(const std::filesystem::path &path, const CfgData &cfg) {
     if (cfg.data_type != DataType::ASCII) {
         auto width = 8 + std::uint64_t(cfg.analog_count) * (cfg.data_type == DataType::BINARY ? 2 : 4) +
                      2 * ((std::uint64_t(cfg.digital_count) + 15) / 16);
         auto size = std::filesystem::file_size(path);
-        require(size % width == 0, "Partial binary DAT row");
+        detail::require(size % width == 0, "Partial binary DAT row");
         return size / width;
     }
     std::ifstream file(path, std::ios::binary);
-    require(bool(file), "Cannot open DAT");
+    detail::require(bool(file), "Cannot open DAT");
     std::int64_t lines = 0;
     char last = '\n';
     std::array<char, 65536> block{};
@@ -73,22 +86,25 @@ std::int64_t physicalRows(const std::filesystem::path &path, const CfgData &cfg)
                 ++lines;
         last = block[size_t(file.gcount() - 1)];
     }
-    require(file.eof(), "DAT read failed");
+    detail::require(file.eof(), "DAT read failed");
     return lines + (last != '\n');
 }
+
 } // namespace
-Json summarize(const std::filesystem::path &cfgPath, const std::filesystem::path &datPath,
-               const Config &config) {
+
+// 详见 docs/ai-analysis.md 中"分析定义和边界"，了解每个字段的取舍和限制。
+inline Json summarize(const std::filesystem::path &cfgPath, const std::filesystem::path &datPath,
+                      const Config &config) {
     config.validate();
-    auto cfgHash = hash(cfgPath), datHash = hash(datPath);
+    auto cfgHash = sha256(cfgPath), datHash = sha256(datPath);
     StreamReader reader(cfgPath.u8string());
     const auto &cfg = reader.getCfg();
-    require(cfg.analog_count >= 0 && cfg.digital_count >= 0 &&
-                std::int64_t(cfg.analog_count) + cfg.digital_count <= config.maxChannels,
-            "Channel limit exceeded");
+    detail::require(cfg.analog_count >= 0 && cfg.digital_count >= 0 &&
+                        std::int64_t(cfg.analog_count) + cfg.digital_count <= config.maxChannels,
+                    "Channel limit exceeded");
     auto rows = physicalRows(datPath, cfg);
     if (config.fullWaveform)
-        require(rows <= config.maxWaveformSamples, "Full waveform sample limit exceeded");
+        detail::require(rows <= config.maxWaveformSamples, "Full waveform sample limit exceeded");
     std::vector<Statistics> all(cfg.analog_count), before(cfg.analog_count), after(cfg.analog_count);
     std::vector<Window> windows;
     std::vector<std::int64_t> transitions(cfg.digital_count);
@@ -134,7 +150,7 @@ Json summarize(const std::filesystem::path &cfgPath, const std::filesystem::path
             double value = row.analog_values[c];
             if (!std::isfinite(value)) {
                 ++nonFinite;
-                require(!config.fullWaveform, "Non-finite full waveform value");
+                detail::require(!config.fullWaveform, "Non-finite full waveform value");
                 continue;
             }
             all[c].add(value, time);
@@ -158,9 +174,9 @@ Json summarize(const std::filesystem::path &cfgPath, const std::filesystem::path
                 values.push_back(value);
         }
         if (config.fullWaveform) {
-            require(samples < config.maxWaveformSamples, "Full waveform sample limit exceeded");
+            detail::require(samples < config.maxWaveformSamples, "Full waveform sample limit exceeded");
             waveformBytes += values.dump().size() + 1;
-            require(waveformBytes <= config.maxRequestBytes, "Full waveform byte limit exceeded");
+            detail::require(waveformBytes <= config.maxRequestBytes, "Full waveform byte limit exceeded");
             waveform.push_back(values);
         }
         previous = row.digital_values;
@@ -168,10 +184,10 @@ Json summarize(const std::filesystem::path &cfgPath, const std::filesystem::path
         lastIndex = row.index;
         ++samples;
     });
-    require(samples > 0, "No valid DAT samples");
+    detail::require(samples > 0, "No valid DAT samples");
     std::int64_t expected = cfg.sample_rates.empty() ? 0 : cfg.sample_rates.back().end_sample;
     if (config.fullWaveform)
-        require(samples == rows && (!expected || expected == samples), "Incomplete full waveform");
+        detail::require(samples == rows && (!expected || expected == samples), "Incomplete full waveform");
     Json channels = Json::array(), rates = Json::array(), digital = Json::array(), windowJson = Json::array(),
          columns{"sampleIndex", "rawTimestamp", "timeOffsetNs"};
     for (size_t i = 0; i < all.size(); ++i) {
@@ -255,7 +271,7 @@ Json summarize(const std::filesystem::path &cfgPath, const std::filesystem::path
     }
     if (config.fullWaveform)
         result["waveform"] = Json{{"columns", columns}, {"rows", waveform}};
-    require(hash(cfgPath) == cfgHash && hash(datPath) == datHash, "Input changed during analysis");
+    detail::require(sha256(cfgPath) == cfgHash && sha256(datPath) == datHash, "Input changed during analysis");
     return result;
 }
 

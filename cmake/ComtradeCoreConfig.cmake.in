@@ -9,10 +9,17 @@ include("${CMAKE_CURRENT_LIST_DIR}/ComtradeCoreTargets.cmake")
 if("AI" IN_LIST ComtradeCore_FIND_COMPONENTS)
     if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/ComtradeAITargets.cmake")
         find_dependency(nlohmann_json 3.12)
+        find_dependency(httplib)
         find_dependency(OpenSSL 3.0)
         find_dependency(Threads)
         include("${CMAKE_CURRENT_LIST_DIR}/ComtradeAITargets.cmake")
         set(ComtradeCore_AI_FOUND TRUE)
+        # Points a consuming project at the installed example configuration (see
+        # config/ai-config.example.json) so it can be copied/configure_file()'d without guessing
+        # ComtradeCore's install layout, e.g.:
+        #   configure_file(${ComtradeCore_AI_CONFIG_EXAMPLE} ${CMAKE_BINARY_DIR}/ai-config.json COPYONLY)
+        set(ComtradeCore_AI_CONFIG_EXAMPLE
+            "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_DATAROOTDIR@/doc/ComtradeCore/ai-config.example.json")
     else()
         set(ComtradeCore_AI_FOUND FALSE)
     endif()

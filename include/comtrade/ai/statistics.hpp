@@ -1,16 +1,24 @@
+/**
+ * @file statistics.hpp
+ * @brief Streaming min/max/mean/RMS accumulator used by the AI evidence summarizer. Pure standard
+ *        library, no COMTRADE or AI module dependency, so it can be reused or tested on its own.
+ */
 #pragma once
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <stdexcept>
 
 namespace comtrade::ai {
+
 // Finite engineering values only. RMS includes DC and is sample-weighted.
 // Scaling avoids overflowing x*x even for values near DBL_MAX.
 struct Statistics {
     std::uint64_t count = 0;
     std::int64_t minTime = 0, maxTime = 0;
     double minimum = 0, maximum = 0, mean = 0, scale = 0, squares = 0;
+
     void add(double value, std::int64_t time) {
         if (!std::isfinite(value))
             throw std::invalid_argument("Statistics requires finite values");
@@ -34,6 +42,7 @@ struct Statistics {
             squares += ratio * ratio;
         }
     }
+
     void merge(const Statistics &other) {
         if (!other.count)
             return;
@@ -58,8 +67,10 @@ struct Statistics {
         scale = combinedScale;
         count = total;
     }
+
     double rms() const noexcept {
         return count ? scale * std::sqrt(std::min(1.0, squares / double(count))) : 0;
     }
 };
+
 } // namespace comtrade::ai

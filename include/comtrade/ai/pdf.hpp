@@ -1,17 +1,29 @@
-#include <codecvt>
-#include <comtrade/ai.hpp>
-#include <cstdio>
-#include <ctime>
-#include <fcntl.h>
-#include <fstream>
+/**
+ * @file pdf.hpp
+ * @brief Renders the local evidence (evidence.hpp) and the model's text (client.hpp) into a
+ *        Chinese-capable PDF report. Pure C++ over libharu, no Qt: an embedded TrueType/TrueType
+ *        Collection font supplies the glyphs, and output is written exclusively through
+ *        writeNewFile() so a report can never silently overwrite an existing file.
+ */
+#pragma once
+
+#include "config.hpp"
+#include "detail.hpp"
+
 #include <hpdf.h>
 #include <hpdf_font.h>
 #include <hpdf_fontdef.h>
+
+#include <codecvt>
+#include <cstdio>
+#include <ctime>
+#include <fcntl.h>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <locale>
 #include <memory>
 #include <sstream>
-#include <stdexcept>
 #include <sys/stat.h>
 #ifdef _WIN32
 #include <io.h>
@@ -21,23 +33,25 @@
 
 namespace comtrade::ai {
 namespace {
-void require(bool ok, const char *message) {
-    if (!ok)
-        throw std::runtime_error(message);
-}
-void checked(HPDF_STATUS status) { require(status == HPDF_OK, "PDF rendering failed"); }
-std::string utf8(char32_t ch) {
+
+void checked(HPDF_STATUS status) { detail::require(status == HPDF_OK, "PDF rendering failed"); }
+
+std::string toUtf8(char32_t ch) {
     return std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t>{}.to_bytes(ch);
 }
+
 } // namespace
-void writeNewFile(const std::filesystem::path &path, const std::string &bytes) {
+
+// Exclusive creation: never replaces an existing file. Used for both the JSON evidence dump
+// (CLI `summarize`) and the PDF report, so a report can never silently clobber a previous one.
+inline void writeNewFile(const std::filesystem::path &path, const std::string &bytes) {
 #ifdef _WIN32
     int descriptor = _wopen(path.c_str(), _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY, _S_IREAD | _S_IWRITE);
-    require(descriptor >= 0, "Cannot create output (destination must not exist)");
+    detail::require(descriptor >= 0, "Cannot create output (destination must not exist)");
     auto *file = _fdopen(descriptor, "wb");
 #else
     int descriptor = open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600);
-    require(descriptor >= 0, "Cannot create output (destination must not exist)");
+    detail::require(descriptor >= 0, "Cannot create output (destination must not exist)");
     auto *file = fdopen(descriptor, "wb");
 #endif
     if (!file) {
@@ -58,24 +72,25 @@ void writeNewFile(const std::filesystem::path &path, const std::string &bytes) {
         throw std::runtime_error("Output write failed");
     }
 }
-void exportPdf(const std::filesystem::path &path, const Json &evidence, const std::string &interpretation,
-               const Config &config) {
-    require(!std::filesystem::exists(path), "PDF already exists");
-    require(evidence.is_object(), "PDF evidence must be an object");
+
+inline void exportPdf(const std::filesystem::path &path, const Json &evidence, const std::string &interpretation,
+                      const Config &config) {
+    detail::require(!std::filesystem::exists(path), "PDF already exists");
+    detail::require(evidence.is_object(), "PDF evidence must be an object");
     std::unique_ptr<std::remove_pointer_t<HPDF_Doc>, decltype(&HPDF_Free)> pdf(HPDF_New(nullptr, nullptr),
                                                                                HPDF_Free);
-    require(bool(pdf), "Cannot create PDF");
+    detail::require(bool(pdf), "Cannot create PDF");
     checked(HPDF_UseUTFEncodings(pdf.get()));
     std::ifstream fontInput(std::filesystem::u8path(config.pdfFontPath), std::ios::binary);
     char signature[4]{};
     fontInput.read(signature, 4);
-    require(bool(fontInput), "Cannot read PDF font");
+    detail::require(bool(fontInput), "Cannot read PDF font");
     const char *name = std::string(signature, 4) == "ttcf"
                            ? HPDF_LoadTTFontFromFile2(pdf.get(), config.pdfFontPath.c_str(), 0, HPDF_TRUE)
                            : HPDF_LoadTTFontFromFile(pdf.get(), config.pdfFontPath.c_str(), HPDF_TRUE);
-    require(name != nullptr, "Cannot load TrueType PDF font");
+    detail::require(name != nullptr, "Cannot load TrueType PDF font");
     auto font = HPDF_GetFont(pdf.get(), name, "UTF-8");
-    require(font != nullptr, "Cannot initialize PDF font");
+    detail::require(font != nullptr, "Cannot initialize PDF font");
     Json appendix = evidence;
     if (appendix.contains("waveform")) {
         appendix["waveform"].erase("rows");
@@ -105,7 +120,7 @@ void exportPdf(const std::filesystem::path &path, const Json &evidence, const st
     auto attr = static_cast<HPDF_FontAttr>(font->attr);
     // libharu 2.4.4 reuses a Type 1 CID CMap as ToUnicode for UTF-8 fonts.
     // Supply a valid Type 2 identity map so strict PDF readers can extract text.
-    require(attr->cmap_stream != nullptr, "Missing PDF Unicode map");
+    detail::require(attr->cmap_stream != nullptr, "Missing PDF Unicode map");
     HPDF_MemStream_FreeData(attr->cmap_stream->stream);
     checked(HPDF_Stream_WriteStr(attr->cmap_stream->stream,
         "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n"
@@ -118,16 +133,16 @@ void exportPdf(const std::filesystem::path &path, const Json &evidence, const st
     for (char32_t ch : characters) {
         if (ch == '\n' || ch == '\r' || ch == '\t')
             continue;
-        require(ch >= 32 && ch <= 0xffff && !(ch >= 0xd800 && ch <= 0xdfff) &&
-                    HPDF_TTFontDef_GetGlyphid(attr->fontdef, HPDF_UINT16(ch)) != 0,
-                "PDF font is missing required glyphs");
+        detail::require(ch >= 32 && ch <= 0xffff && !(ch >= 0xd800 && ch <= 0xdfff) &&
+                            HPDF_TTFontDef_GetGlyphid(attr->fontdef, HPDF_UINT16(ch)) != 0,
+                        "PDF font is missing required glyphs");
     }
     HPDF_Page page = nullptr;
     float y = 0;
     int pageNumber = 0;
     auto newPage = [&] {
         page = HPDF_AddPage(pdf.get());
-        require(page != nullptr, "Cannot add PDF page");
+        detail::require(page != nullptr, "Cannot add PDF page");
         checked(HPDF_Page_SetSize(page, HPDF_PAGE_SIZE_A4, HPDF_PAGE_PORTRAIT));
         checked(HPDF_Page_SetFontAndSize(page, font, 9));
         checked(HPDF_Page_BeginText(page));
@@ -159,7 +174,7 @@ void exportPdf(const std::filesystem::path &path, const Json &evidence, const st
         }
         if (ch == '\t')
             ch = ' ';
-        auto glyph = utf8(ch);
+        auto glyph = toUtf8(ch);
         float glyphWidth = HPDF_Font_GetUnicodeWidth(font, HPDF_UNICODE(ch)) * 0.01f;
         if (width + glyphWidth > HPDF_Page_GetWidth(page) - 88 && !current.empty()) {
             line(current);
@@ -179,4 +194,5 @@ void exportPdf(const std::filesystem::path &path, const Json &evidence, const st
     bytes.resize(length);
     writeNewFile(path, bytes);
 }
+
 } // namespace comtrade::ai
