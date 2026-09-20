@@ -44,6 +44,15 @@ else()
     set(HTTPLIB_USE_ZSTD_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
     set(HTTPLIB_USE_BROTLI_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
     set(HTTPLIB_USE_ZLIB_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
+    # This module already applies its own connection/read/write/overall timeouts (see
+    # ai/client.hpp), so a non-blocking getaddrinfo() is not required for correct timeout
+    # behavior — DNS resolution being synchronous and thus able to exceed those timeouts is an
+    # already-documented limitation (docs/ai-analysis.md). cpp-httplib's non-blocking
+    # implementation is not reliably self-contained across platforms: on macOS it calls CFHost
+    # APIs (CFNetwork.framework) that its own CMakeLists.txt does not link, causing an undefined
+    # symbol failure at link time; on some older MinGW header sets the Windows path needs
+    # GetAddrInfoExCancel, which is missing entirely. Disabling it sidesteps both.
+    set(HTTPLIB_USE_NON_BLOCKING_GETADDRINFO OFF CACHE BOOL "" FORCE)
     FetchContent_Declare(ai_http GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
         GIT_TAG adf58bf474fac638160592d6c3f67da4ebc7df20) # v0.28.0
     FetchContent_MakeAvailable(ai_http)

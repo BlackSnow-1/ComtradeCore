@@ -2,7 +2,7 @@
  * @file ai.hpp
  * @brief Single include for the optional, header-only COMTRADE AI analysis module, implemented
  *        under comtrade/ai/ as its own self-contained subtree, separate from the rest of the
- *        header-only COMTRADE reader/writer implementation in comtrade/*.hpp.
+ *        header-only COMTRADE reader/writer implementation in the rest of include/comtrade/.
  *
  * Given a COMTRADE CFG/DAT pair, this module builds a local measurement summary
  * (comtrade::ai::summarize, ai/evidence.hpp), optionally sends it to a configured
