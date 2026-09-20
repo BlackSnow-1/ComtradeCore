@@ -646,14 +646,17 @@ public final class Main {
             System.out.println("数字量通道数：" + reader.getDigitalChannelCount());
 
             long processed = reader.processDatStream(datPath, row -> {
-                // 每收到一个采样行就立即打印。
+                // 每收到一个采样行就立即打印。segmentIndex/segmentSampleRate 标识当前点所属的
+                // 采样率段（多段不同采样率的录波才有意义），没有采样段信息时都固定为 0。
                 System.out.printf(
-                        "采样=%d, 原始时间戳=%d, 时间=%s, 模拟量=%s, 数字量=%s%n",
+                        "采样=%d, 原始时间戳=%d, 时间=%s, 模拟量=%s, 数字量=%s, 采样段=%d(%.1f Hz)%n",
                         row.index,
                         row.rawTimestamp,
                         row.absoluteTime,
                         Arrays.toString(row.analogValues),
-                        Arrays.toString(row.digitalValues));
+                        Arrays.toString(row.digitalValues),
+                        row.segmentIndex,
+                        row.segmentSampleRate);
             });
 
             System.out.println("流式读取完成，共处理 " + processed + " 个采样");
@@ -669,7 +672,9 @@ public final class Main {
 ```
 
 `reader.getDataType()` 可用于记录或校验实际编码；四种 DAT 类型使用相同的回调数据结构，回调中的
-模拟量已经应用 CFG 的 `a`、`b` 系数，数字量已经从二进制状态字展开。
+模拟量已经应用 CFG 的 `a`、`b` 系数，数字量已经从二进制状态字展开。`row.segmentIndex`/
+`row.segmentSampleRate` 对应 C++ `SampleRow` 的同名字段（见前面"多段不同采样率的录波"一节），
+用于多段不同采样率的录波在流式回调里判断当前点属于哪一段、这段标称多少赫兹。
 
 ### Java 中的 AI 分析（可选）
 

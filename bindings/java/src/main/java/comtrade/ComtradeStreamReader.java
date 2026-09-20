@@ -22,10 +22,15 @@ public final class ComtradeStreamReader implements AutoCloseable {
         public final String absoluteTime;
         public final double[] analogValues;
         public final boolean[] digitalValues;
+        /** Index into {@link #getSampleRate}; 0 when the record has no sample-rate segments. */
+        public final long segmentIndex;
+        /** Nominal rate (Hz) of the segment this row belongs to; 0 when there is no segment info. */
+        public final double segmentSampleRate;
 
         private SampleRow(long index, long rawTimestamp, long timestampMicroseconds,
                           long timeOffsetNanoseconds, String absoluteTime,
-                          double[] analogValues, boolean[] digitalValues) {
+                          double[] analogValues, boolean[] digitalValues,
+                          long segmentIndex, double segmentSampleRate) {
             this.index = index;
             this.rawTimestamp = rawTimestamp;
             this.timestampMicroseconds = timestampMicroseconds;
@@ -33,6 +38,8 @@ public final class ComtradeStreamReader implements AutoCloseable {
             this.absoluteTime = absoluteTime;
             this.analogValues = analogValues;
             this.digitalValues = digitalValues;
+            this.segmentIndex = segmentIndex;
+            this.segmentSampleRate = segmentSampleRate;
         }
     }
 
@@ -57,13 +64,15 @@ public final class ComtradeStreamReader implements AutoCloseable {
             @Override
             public void onRow(long index, long rawTimestamp, long timestampMicroseconds,
                               long timeOffsetNanoseconds, String absoluteTime,
-                              DoubleVector analog, IntVector digital) {
+                              DoubleVector analog, IntVector digital,
+                              long segmentIndex, double segmentSampleRate) {
                 double[] analogValues = new double[(int) analog.size()];
                 for (int i = 0; i < analogValues.length; ++i) analogValues[i] = analog.get(i);
                 boolean[] digitalValues = new boolean[(int) digital.size()];
                 for (int i = 0; i < digitalValues.length; ++i) digitalValues[i] = digital.get(i) != 0;
                 handler.onRow(new SampleRow(index, rawTimestamp, timestampMicroseconds,
-                        timeOffsetNanoseconds, absoluteTime, analogValues, digitalValues));
+                        timeOffsetNanoseconds, absoluteTime, analogValues, digitalValues,
+                        segmentIndex, segmentSampleRate));
             }
         };
         try {

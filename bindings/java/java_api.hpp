@@ -511,7 +511,9 @@ public:
                        long long time_offset_nanoseconds,
                        const std::string& absolute_time,
                        const std::vector<double>& analog_values,
-                       const std::vector<int>& digital_values) = 0;
+                       const std::vector<int>& digital_values,
+                       long long segment_index,
+                       double segment_sample_rate) = 0;
 };
 
 class ComtradeNativeStreamReader {
@@ -530,7 +532,9 @@ public:
                            comtrade::utils::formatTime(
                                row.absolute_time, reader_.getCfg().timestamp_fractional_digits),
                            row.analog_values,
-                           digital_values);
+                           digital_values,
+                           static_cast<long long>(row.segment_index),
+                           row.segment_sample_rate);
         });
         if (count > static_cast<std::size_t>(std::numeric_limits<long long>::max())) {
             throw std::overflow_error("parsed row count exceeds Java long range");
