@@ -36,6 +36,14 @@ else()
     message(STATUS "ComtradeCore AI: local cpp-httplib >= 0.28 not found. Fetching v0.28.0 from GitHub...")
     set(HTTPLIB_REQUIRE_OPENSSL ON CACHE BOOL "" FORCE)
     set(HTTPLIB_TEST OFF CACHE BOOL "" FORCE)
+    # This module never needs response decompression (no Accept-Encoding is ever sent), and
+    # cpp-httplib's own optional zstd/brotli/zlib auto-detection is fragile across distros: some
+    # systems ship a zstd/zlib CMake package config whose actual target name doesn't match what
+    # cpp-httplib's CMakeLists.txt expects, which fails at CMake generate time with an unrelated-
+    # looking "target not found" error. Disabling all three sidesteps that class of failure entirely.
+    set(HTTPLIB_USE_ZSTD_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
+    set(HTTPLIB_USE_BROTLI_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
+    set(HTTPLIB_USE_ZLIB_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
     FetchContent_Declare(ai_http GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
         GIT_TAG adf58bf474fac638160592d6c3f67da4ebc7df20) # v0.28.0
     FetchContent_MakeAvailable(ai_http)
