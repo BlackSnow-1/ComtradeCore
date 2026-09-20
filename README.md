@@ -40,6 +40,10 @@ IEEE/IEC C37.111-2013 CFG 支持采样率段、时间倍率、小数秒精度、
 - Linux 和 macOS 需要系统提供 `iconv`（glibc 发行版和 macOS 通常已经内置）。
 - GoogleTest 仅在构建单元测试时需要；核心库本身不依赖 GoogleTest。
 - Java 绑定为可选组件；构建时还需要 SWIG 4.0 或更高版本、JDK（包含 JNI 头文件）和 Java 编译器。
+- C++ AI 录波分析（`COMTRADE_BUILD_AI`）为可选组件，默认关闭，核心库不受影响；需要 **CMake 3.18
+  或更高版本**（高于核心库本身的 3.14）和 OpenSSL 3.0 及以上开发包，其余三个依赖（nlohmann/json、
+  cpp-httplib、libharu）在本机找不到合适版本时会自动联网拉取固定版本，详见文末"C++ AI 录波分析"
+  一节。
 
 ## 安装与集成
 
@@ -301,7 +305,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
   -Dfile="$PWD/install/lib/comtrade/java/comtrade-core-java.jar" \
   -DgroupId=io.github.blacksnow1 \
   -DartifactId=comtrade-core-java \
-  -Dversion=1.1.0.0 \
+  -Dversion=1.2.0.0 \
   -Dpackaging=jar \
   -DgeneratePom=true
 ```
@@ -312,7 +316,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
 <dependency>
     <groupId>io.github.blacksnow1</groupId>
     <artifactId>comtrade-core-java</artifactId>
-    <version>1.1.0.0</version>
+    <version>1.2.0.0</version>
 </dependency>
 ```
 
@@ -328,7 +332,7 @@ mvn -U clean package
 > 在 IntelliJ IDEA 的 **VM options** 或 `java` 命令中，必须加入下面两个 JVM 参数：
 >
 > ```text
-> --enable-native-access=ALL-UNNAMED -Djava.library.path=/home/wangguangbo/ComtradeCore/install/lib/comtrade/java
+> --enable-native-access=ALL-UNNAMED -Djava.library.path=/home/user/ComtradeCore/install/lib/comtrade/java
 > ```
 >
 > `--enable-native-access=ALL-UNNAMED` 用于允许当前 JAR 中的 JNI 代码访问本地库，避免新版 JDK 的本地访问警告以及将来的访问阻止；`-Djava.library.path=...` 用于让 JVM 找到 `libComtradeCoreJava.so`。这些参数必须写在 `-jar` 或主类名称之前，不能放在程序参数（Program arguments）中。其他用户部署时，请将路径替换为自己的实际安装路径。
@@ -336,14 +340,14 @@ mvn -U clean package
 ```bash
 java \
   --enable-native-access=ALL-UNNAMED \
-  -Djava.library.path=/home/wangguangbo/ComtradeCore/install/lib/comtrade/java \
+  -Djava.library.path=/home/user/ComtradeCore/install/lib/comtrade/java \
   -jar target/your-application.jar
 ```
 
 也可以为当前进程设置动态库搜索目录：
 
 ```bash
-LD_LIBRARY_PATH=/home/wangguangbo/ComtradeCore/install/lib/comtrade/java \
+LD_LIBRARY_PATH=/home/user/ComtradeCore/install/lib/comtrade/java \
   java --enable-native-access=ALL-UNNAMED -jar target/your-application.jar
 ```
 
@@ -512,7 +516,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file `
   "-Dfile=D:\testjavaInterface\libs\comtrade-core-java.jar" `
   "-DgroupId=io.github.blacksnow1" `
   "-DartifactId=comtrade-core-java" `
-  "-Dversion=1.1.0.0" `
+  "-Dversion=1.2.0.0" `
   "-Dpackaging=jar" `
   "-DgeneratePom=true"
 ```
@@ -520,7 +524,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file `
 安装位置默认为：
 
 ```text
-%USERPROFILE%\.m2\repository\io\github\blacksnow1\comtrade-core-java\1.1.0.0\
+%USERPROFILE%\.m2\repository\io\github\blacksnow1\comtrade-core-java\1.2.0.0\
 ```
 
 随后在项目的 `pom.xml` 中声明：
@@ -529,7 +533,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file `
 <dependency>
     <groupId>io.github.blacksnow1</groupId>
     <artifactId>comtrade-core-java</artifactId>
-    <version>1.1.0.0</version>
+    <version>1.2.0.0</version>
 </dependency>
 ```
 
@@ -553,7 +557,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
   -Dfile=/path/to/comtrade-install/lib/comtrade/java/comtrade-core-java.jar \
   -DgroupId=io.github.blacksnow1 \
   -DartifactId=comtrade-core-java \
-  -Dversion=1.1.0.0 \
+  -Dversion=1.2.0.0 \
   -Dpackaging=jar \
   -DgeneratePom=true
 ```
@@ -564,7 +568,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
 <dependency>
     <groupId>io.github.blacksnow1</groupId>
     <artifactId>comtrade-core-java</artifactId>
-    <version>1.1.0.0</version>
+    <version>1.2.0.0</version>
 </dependency>
 ```
 
@@ -590,7 +594,7 @@ mvn org.apache.maven.plugins:maven-deploy-plugin:3.1.4:deploy-file \
   -Dfile=/path/to/comtrade-install/lib/comtrade/java/comtrade-core-java.jar \
   -DgroupId=io.github.blacksnow1 \
   -DartifactId=comtrade-core-java \
-  -Dversion=1.1.0.0 \
+  -Dversion=1.2.0.0 \
   -Dpackaging=jar \
   -DrepositoryId=internal-releases \
   -Durl=https://maven.example.com/repository/maven-releases/
@@ -631,8 +635,8 @@ import java.util.Arrays;
 
 public final class Main {
     public static void main(String[] args) {
-        String cfgPath = "/home/wangguangbo/ComtradeFiles/cometrade/000002.CFG";
-        String datPath = "/home/wangguangbo/ComtradeFiles/cometrade/000002.DAT";
+        String cfgPath = "/home/user/ComtradeFiles/cometrade/000002.CFG";
+        String datPath = "/home/user/ComtradeFiles/cometrade/000002.DAT";
 
         try (ComtradeStreamReader reader = new ComtradeStreamReader(cfgPath)) {
             System.out.println("站点：" + reader.getStationName());
@@ -661,7 +665,7 @@ public final class Main {
 在 IntelliJ IDEA 中运行时，把下面内容放入运行配置的 **VM options**：
 
 ```text
---enable-native-access=ALL-UNNAMED -Djava.library.path=/home/wangguangbo/ComtradeCore/install/lib/comtrade/java
+--enable-native-access=ALL-UNNAMED -Djava.library.path=/home/user/ComtradeCore/install/lib/comtrade/java
 ```
 
 `reader.getDataType()` 可用于记录或校验实际编码；四种 DAT 类型使用相同的回调数据结构，回调中的
@@ -968,7 +972,8 @@ StreamEngineTest.GeneratesComtradeFilesAndStreamsEverySample
 ```text
 ComtradeCore/
 ├── .github/
-│   ├── install-test/              # CMake 安装集成验证
+│   ├── install-test/              # 核心库 CMake 安装集成验证
+│   ├── ai-install-test/           # AI 模块 CMake 安装集成验证（find_package COMPONENTS AI）
 │   └── workflows/                # CI 与基准测试工作流
 ├── benchmarks/
 │   ├── CMakeLists.txt
@@ -984,7 +989,10 @@ ComtradeCore/
 │       ├── ComtradeStreamWriter.java
 │       └── ComtradeAI.java        # 可选：只在启用 AI 模块时随 JAR 一起构建
 ├── cmake/
-│   └── ComtradeCoreConfig.cmake.in # CMake package 配置模板
+│   ├── ComtradeCoreConfig.cmake.in # CMake package 配置模板
+│   └── ComtradeFindHpdf.cmake      # 查找/校验本机 libharu 2.4.x 的共享逻辑
+│                                   # （analysis/cpp/CMakeLists.txt 与安装后的
+│                                   #  ComtradeCoreConfig.cmake 都会用到）
 ├── docs/
 │   └── swig-jni-java-binding-guide.md # SWIG/JNI 映射教程
 ├── examples/
