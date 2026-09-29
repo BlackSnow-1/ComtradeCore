@@ -78,7 +78,28 @@ AI)` 会正确报告 AI 组件不可用。
 
 ## 命令行
 
+### 配置文件放在哪里
+
+配置文件没有固定存放目录，也不要求固定文件名。程序不会自动搜索项目根目录、可执行文件目录或
+用户目录；必须显式传入配置路径：CLI 使用 `summarize`/`analyze` 后的第一个参数，C++ 使用
+`Config::fromFile(path)`，Java 则由调用方读取文件后传入 JSON 字符串。
+
+- 使用 `ai-config.json` 等相对路径时，以**进程当前工作目录**为基准，不是可执行文件或库所在目录。
+- 在 CLion/IDEA 中运行时，以运行配置的 **Working directory（工作目录）** 为准；也可以传入绝对路径。
+- 配置内的 `pdfFontPath` 和 `caBundle` 若使用相对路径，也以进程工作目录为基准，
+  不会自动相对于 JSON 文件所在目录解析。部署时建议使用绝对路径。
+- 安装包提供的是示例配置，应用仍需自行复制、填写并显式加载，不会自动生成或加载运行配置。
+
+例如配置放在 `/opt/my-app/config/ai-config.json`，可以从任意工作目录指定它：
+
+```sh
+comtrade-ai analyze /opt/my-app/config/ai-config.json /data/sample.cfg /data/sample.dat /data/report.pdf
+```
+
+### 从仓库示例开始
+
 复制 `config/ai-config.example.json` 为被 Git 忽略的 `ai-config.json`，填写 endpoint、model 和字体路径。
+下面的相对路径示例假定从仓库根目录运行，且 `ai-config.json`、`sample.cfg`、`sample.dat` 都在该目录。
 Windows 中文字体示例：`C:/Windows/Fonts/simhei.ttf` 或 `C:/Windows/Fonts/simsun.ttc`。
 
 ```sh

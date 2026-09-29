@@ -220,6 +220,11 @@ reader.processDatStream("record.dat", [&](const comtrade::SampleRow& row) {
 （`COMTRADE_INSTALL_AI`）是两个独立的 CMake 选项，详见
 [构建、配置与测试说明、每个配置字段的含义和依赖版本](docs/ai-analysis.md)。
 
+AI 配置文件可放在任意可读目录，但必须显式指定路径，不会自动查找。`ai-config.json` 这样的相对路径
+以程序的**当前工作目录**为基准；CLion/IDEA 中对应运行配置的 Working directory。
+配置内的 `pdfFontPath`、`caBundle` 相对路径也遵循同一规则。详细示例见
+[配置文件放在哪里](docs/ai-analysis.md#配置文件放在哪里)。
+
 ```sh
 cmake -S . -B build-ai -DCOMTRADE_BUILD_AI=ON -DCMAKE_BUILD_TYPE=Release
 cmake --build build-ai --config Release --parallel 2
