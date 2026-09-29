@@ -135,6 +135,22 @@ Reader 会把 CFG 中的模拟通道系数应用到 DAT 原始值：
 
 ### 多段不同采样率的录波
 
+支持同一组 CFG/DAT 文件内包含多段采样率，适用于 `ASCII`、`BINARY`、`BINARY32` 和 `FLOAT32`。
+这里的采样率与 `cfg.line_frequency`（电网标称频率）是不同字段。写出文件前可显式配置：
+
+```cpp
+record.getMutableCfg().sample_rates = {
+    {1000.0, 2},   // 第 1～2 点：1000 Hz
+    {2000.0, 6},   // 第 3～6 点：2000 Hz
+    {4000.0, 10}   // 第 7～10 点：4000 Hz
+};
+```
+
+`end_sample` 是累计结束采样号，包含该点，不是该段点数。`Record::saveCfg()` 保留全部段，默认写出
+实际段数；`variable_sample_rate=true` 时保留 `nrates=0` 的表示方式。未配置 `sample_rates` 时，
+保存 CFG 只会尝试由前两个时间戳推导单段采样率，不会自动识别多段。DAT 写入时间戳由调用方提供，
+读取时间按 DAT 时间戳和 `TIMEMULT` 换算，不根据分段采样率重建零时间戳。
+
 IEEE C37.111-2013 允许一份录波包含多段不同采样率（`cfg.sample_rates`，每段记录标称采样率和该段
 最后一个物理采样点的累计序号）。逐点流式处理这类录波时，如果只按固定时长分窗口或分批，无法知道
 "这一批点里混进了几种采样率"；`SampleRow` 因此直接带上了两个字段，免去调用方自己按 `end_sample`
@@ -149,9 +165,10 @@ reader.processDatStream("record.dat", [](const comtrade::SampleRow& row) {
 });
 ```
 
-`StreamReader` 按物理采样序号（第一个有效点为 1）在 `cfg().sample_rates` 中单调向后定位当前
-采样段：DAT 本身就是严格按序产生的，所以定位游标只会前移，不会倒退，整份文件的定位总代价是
-O(采样段数)，不会随采样点数增长，不影响流式处理原有的常数级内存占用。典型用法是在段切换时结束
+`StreamReader` 按成功解析的采样点顺序（第一个有效点为 1）在 `getCfg().sample_rates` 中单调向后定位当前
+采样段，不使用 DAT 的 `row.index` 定位；被跳过的损坏行不计入该顺序，因此缺行文件的段归属可能偏移。
+每次读取都会重置段游标。每点判断为常数开销，整份文件的游标前移次数不超过采样段数，
+不影响流式处理原有的常数级内存占用。典型用法是在段切换时结束
 当前批次、按新的 `segment_sample_rate` 重新决定窗口大小或重采样参数，例如：
 
 ```cpp
@@ -164,6 +181,17 @@ reader.processDatStream("record.dat", [&](const comtrade::SampleRow& row) {
     // ...按当前段处理 row...
 });
 ```
+
+对应单元测试位于 `tests/test_stream.cpp`：
+
+- `Comtrade2013ZeroNratesAcceptsAnyNumberOfSampleRateSegments`：三段 CFG 解析和 `nrates=0` 回写。
+- `MultiRateSegmentsExposeSegmentIndexAndRateWhileStreaming`：ASCII 三段逐点归属及切换边界。
+- `MultiRateSegmentsRoundTripAllFormatsAndResetOnRepeatedReads`：四种 DAT 格式、显式段数和 `nrates=0`、
+  全部段参数、边界前后采样率、时间戳、通道值及重复读取时的段游标重置。
+- `NoSampleRateSegmentsLeaveSegmentFieldsAtDefault`：未指定采样率时回调字段的默认值。
+
+可运行 `ctest --test-dir build -R 'MultiRateSegments|ZeroNrates|NoSampleRateSegments' --output-on-failure`
+验证上述场景（将 `build` 替换为实际构建目录）。
 
 ### 回调对象的生命周期
 
@@ -916,13 +944,15 @@ StreamEngineTest.GeneratesComtradeFilesAndStreamsEverySample
 自动化流程覆盖 Linux GCC、Linux Clang、macOS Apple Clang 和 Windows MSVC，并执行：
 
 1. 配置和编译库、示例及 GoogleTest 测试。
-2. 通过 CTest 运行全部单元测试。
+2. 分别运行 CTest `unit`（包含多段采样率）和 `accuracy`（Git LFS 真实录波）测试，归档 JUnit 报告 14 天。
 3. 安装 ComtradeCore 到临时 staging 目录。
 4. 使用独立消费者项目验证 `find_package(ComtradeCore CONFIG REQUIRED)`。
 5. 上传保留 7 天的安装包构件。
 
 真实 COMTRADE 文件的准确性测试和流式读取基准方法见
-[`tests/README.md`](tests/README.md)。常规 CI 会选择性下载一组 Git LFS 测试文件并运行准确性测试；
+[`tests/README.md`](tests/README.md)。常规 CI 会选择性下载 7 组 Git LFS 真实录波，运行 8 项准确性测试，
+并启用 `COMTRADE_REQUIRE_REAL_FIXTURES=ON`：文件缺失或仍是 LFS 指针时必须失败，不允许静默跳过。
+Release 工作流复用 CI，全部验证通过后才发布；
 `.github/workflows/benchmark.yml` 每周或手动运行 Release/GCC 基准，并保存性能结果 30 天。
 
 ## 目录结构

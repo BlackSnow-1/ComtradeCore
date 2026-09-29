@@ -16,7 +16,7 @@ if(TEST_SOURCES)
     )
 
     include(GoogleTest)
-    gtest_discover_tests(comtrade_unit_tests)
+    gtest_discover_tests(comtrade_unit_tests PROPERTIES LABELS "unit")
 
     message(STATUS "ComtradeCore: Unit tests enabled.")
 else()
@@ -24,6 +24,7 @@ else()
 endif()
 
 set(COMTRADE_REAL_FILE_TEST "${CMAKE_CURRENT_SOURCE_DIR}/test_real_files.cpp")
+option(COMTRADE_REQUIRE_REAL_FIXTURES "Fail real-file tests when Git LFS fixtures are not downloaded" OFF)
 if(EXISTS "${COMTRADE_REAL_FILE_TEST}")
     add_executable(comtrade_accuracy_tests "${COMTRADE_REAL_FILE_TEST}")
     target_link_libraries(comtrade_accuracy_tests PRIVATE
@@ -33,6 +34,7 @@ if(EXISTS "${COMTRADE_REAL_FILE_TEST}")
     )
     target_compile_definitions(comtrade_accuracy_tests PRIVATE
             COMTRADE_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/ComtradeFiles"
+            COMTRADE_REQUIRE_REAL_FIXTURES=$<BOOL:${COMTRADE_REQUIRE_REAL_FIXTURES}>
     )
 
     include(GoogleTest)
