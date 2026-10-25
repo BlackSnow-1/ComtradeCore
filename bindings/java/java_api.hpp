@@ -42,6 +42,16 @@ inline std::string warningsText(const comtrade::Warnings& warnings) {
     for (const auto& w : warnings) text += w.code + ": " + w.message + " [row=" + std::to_string(w.first_row) + ", count=" + std::to_string(w.count) + "]\n";
     return text;
 }
+inline std::string hexBytes(const std::string& bytes) {
+    static const char hex[] = "0123456789abcdef";
+    std::string result; result.reserve(bytes.size()*2);
+    for (unsigned char byte : bytes) { result += hex[byte >> 4]; result += hex[byte & 15]; }
+    return result;
+}
+inline comtrade::DatTailPolicy tailPolicy(int mode) {
+    if (mode < 0 || mode > 1) throw std::invalid_argument("Invalid DAT tail policy");
+    return static_cast<comtrade::DatTailPolicy>(mode);
+}
 inline void validateFinite(const double value, const char* description) {
     if (!std::isfinite(value)) throw std::invalid_argument(std::string(description) + " must be finite");
 }
@@ -86,6 +96,20 @@ public:
 
     bool loadCff(const std::string& path) { return record_.loadCff(path); }
     bool saveCff(const std::string& path) const { return record_.saveCff(path); }
+    bool saveCff(const std::string& path, bool copy_tail) const { return record_.saveCff(path,copy_tail); }
+    bool saveDat(const std::string& path, bool copy_tail) const { return record_.saveDat(path,copy_tail); }
+    bool saveDatTail(const std::string& path) const { return record_.saveDatTail(path); }
+    long long datTailByteCount() const { return static_cast<long long>(record_.getDatTail().byte_count); }
+    long long datTailOffset() const { return static_cast<long long>(record_.getDatTail().offset); }
+    bool datTailTruncated() const { return record_.getDatTail().truncated; }
+    std::string datTailBytesHex() const { return comtrade_java_detail::hexBytes(record_.getDatTail().bytes); }
+    void setDatTailPolicy(int mode) {
+        auto options=record_.getReadOptions(); options.dat_tail_policy=comtrade_java_detail::tailPolicy(mode); record_.setReadOptions(options);
+    }
+    void setMaxRetainedDatTailBytes(int limit) {
+        if (limit < 0) throw std::invalid_argument("Negative retention limit");
+        auto options=record_.getReadOptions(); options.max_retained_tail_bytes=static_cast<size_t>(limit); record_.setReadOptions(options);
+    }
     std::string warnings() const { return comtrade_java_detail::warningsText(record_.getWarnings()); }
     std::string header() const { return record_.getHeader(); }
     std::string information() const { return record_.getInformation(); }
@@ -107,6 +131,7 @@ public:
 
     bool load(const std::string& cfg_path, const std::string& dat_path) {
         comtrade::Record loaded;
+        loaded.setReadOptions(record_.getReadOptions());
         if (!loaded.parseCfg(cfg_path) || !loaded.parseDat(dat_path)) return false;
         record_ = std::move(loaded);
         return true;
@@ -567,12 +592,23 @@ public:
         return static_cast<long long>(count);
     }
 
+    long long datTailByteCount() const { return static_cast<long long>(reader_.getDatTail().byte_count); }
+    long long datTailOffset() const { return static_cast<long long>(reader_.getDatTail().offset); }
+    bool datTailTruncated() const { return reader_.getDatTail().truncated; }
+    std::string datTailBytesHex() const { return comtrade_java_detail::hexBytes(reader_.getDatTail().bytes); }
+    void setDatTailPolicy(int mode) {
+        auto options=reader_.getReadOptions(); options.dat_tail_policy=comtrade_java_detail::tailPolicy(mode); reader_.setReadOptions(options);
+    }
+    void setMaxRetainedDatTailBytes(int limit) {
+        if (limit < 0) throw std::invalid_argument("Negative retention limit");
+        auto options=reader_.getReadOptions(); options.max_retained_tail_bytes=static_cast<size_t>(limit); reader_.setReadOptions(options);
+    }
     std::string warnings() const { return comtrade_java_detail::warningsText(reader_.getWarnings()); }
     std::string header() const { return reader_.getHeader(); }
     std::string information() const { return reader_.getInformation(); }
     void setTimeAxisMode(int mode) {
         if (mode < 0 || mode > 2) throw std::invalid_argument("Invalid time axis mode");
-        reader_.setReadOptions({static_cast<comtrade::TimeAxisMode>(mode)});
+        auto options = reader_.getReadOptions(); options.time_axis=static_cast<comtrade::TimeAxisMode>(mode); reader_.setReadOptions(options);
     }
     std::string stationName() const { return reader_.getCfg().station_name; }
     std::string deviceId() const { return reader_.getCfg().rec_dev_id; }

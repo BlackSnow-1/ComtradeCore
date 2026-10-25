@@ -39,6 +39,34 @@ public final class ExtensionsTest {
                     catch (IllegalStateException expected) { require(expected.getMessage().equals("callback")); }
                 }
             }
+            Path cfg=dir.resolve("footer.cfg"), dat=dir.resolve("footer.dat"), exported=dir.resolve("footer.raw");
+            byte[] footer=new byte[]{3,0,0,0,(byte)0xd0,7,0,0,99,0};
+            try {
+                try (ComtradeRecord record=new ComtradeRecord()) {
+                    record.setStationAndDevice("S","D",ComtradeRecord.StandardVersion.V2013);
+                    record.setDataType(ComtradeRecord.DataType.BINARY);
+                    record.addAnalogChannel(1,"A","A","A",1,0);
+                    record.addSample(0,new double[]{1},new boolean[0]);
+                    record.addSample(1000,new double[]{2},new boolean[0]);
+                    record.save(cfg.toString(),dat.toString());
+                }
+                Files.write(dat,footer,StandardOpenOption.APPEND);
+                try (ComtradeRecord loaded=new ComtradeRecord()) {
+                    loaded.load(cfg.toString(),dat.toString()); require(loaded.getSampleCount()==2);
+                    require(java.util.Arrays.equals(loaded.getDatTail().bytes,footer));
+                    require(loaded.saveDatTail(exported.toString()));
+                    require(java.util.Arrays.equals(Files.readAllBytes(exported),footer));
+                }
+                try (ComtradeStreamReader reader=new ComtradeStreamReader(cfg.toString())) {
+                    reader.setMaxRetainedDatTailBytes(3);
+                    require(reader.processDatStream(dat.toString(),row->{})==2);
+                    require(reader.getDatTail().byteCount==10 && reader.getDatTail().truncated && reader.getDatTail().bytes.length==3);
+                    reader.setDatTailPolicy(ComtradeRecord.DatTailPolicy.PARSE_TO_END);
+                    reader.setTimeAxisMode(ComtradeStreamReader.TimeAxisMode.DAT_TIMESTAMPS);
+                    require(reader.processDatStream(dat.toString(),row->{})==3);
+                    require(reader.getDatTail().byteCount==0);
+                }
+            } finally { Files.deleteIfExists(cfg); Files.deleteIfExists(dat); Files.deleteIfExists(exported); }
             try (ComtradeRecord record = new ComtradeRecord()) {
                 record.addSample(4294967296L,new double[0],new boolean[0]);
                 require(record.getTimestampMicroseconds(0)==4294967296L);

@@ -93,6 +93,13 @@ public final class ComtradeStreamReader implements AutoCloseable {
     public String getHeader() { return nativeReader().header(); }
     public String getInformation() { return nativeReader().information(); }
 
+    public ComtradeRecord.DatTail getDatTail() {
+        ComtradeNativeStreamReader r=nativeReader();
+        return new ComtradeRecord.DatTail(r.datTailOffset(),r.datTailByteCount(),r.datTailBytesHex(),r.datTailTruncated());
+    }
+    public void setDatTailPolicy(ComtradeRecord.DatTailPolicy policy) { nativeReader().setDatTailPolicy(Objects.requireNonNull(policy).ordinal()); }
+    public void setMaxRetainedDatTailBytes(int limit) { nativeReader().setMaxRetainedDatTailBytes(limit); }
+
     public String getStationName() { return nativeReader().stationName(); }
     public String getDeviceId() { return nativeReader().deviceId(); }
     public ComtradeRecord.StandardVersion getStandardVersion() {

@@ -28,6 +28,7 @@ set_source_files_properties(comtrade.i PROPERTIES
         CPLUSPLUS ON
         USE_TARGET_INCLUDE_DIRECTORIES TRUE
         COMPILE_OPTIONS "${COMTRADE_SWIG_OPTIONS}"
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/java_api.hpp;${CMAKE_CURRENT_SOURCE_DIR}/ai_java_api.hpp"
 )
 
 swig_add_library(ComtradeCoreJava

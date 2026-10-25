@@ -102,6 +102,29 @@ public final class ComtradeRecord implements AutoCloseable {
 
     private ComtradeNativeRecord nativeRecord = new ComtradeNativeRecord();
 
+    public enum DatTailPolicy { AFTER_CFG_SAMPLES, PARSE_TO_END }
+    public static final class DatTail {
+        public final long offset, byteCount;
+        public final byte[] bytes;
+        public final boolean truncated;
+        DatTail(long offset, long byteCount, String hex, boolean truncated) {
+            this.offset=offset; this.byteCount=byteCount; this.truncated=truncated;
+            bytes=new byte[hex.length()/2];
+            for (int i=0;i<bytes.length;++i) bytes[i]=(byte)Integer.parseInt(hex.substring(i*2,i*2+2),16);
+        }
+    }
+    public DatTail getDatTail() {
+        ComtradeNativeRecord r=nativeRecord();
+        return new DatTail(r.datTailOffset(),r.datTailByteCount(),r.datTailBytesHex(),r.datTailTruncated());
+    }
+    public void setDatTailPolicy(DatTailPolicy policy) { nativeRecord().setDatTailPolicy(Objects.requireNonNull(policy).ordinal()); }
+    public void setMaxRetainedDatTailBytes(int limit) { nativeRecord().setMaxRetainedDatTailBytes(limit); }
+    public boolean saveDatTail(String path) { return nativeRecord().saveDatTail(Objects.requireNonNull(path)); }
+    public boolean saveDat(String path, boolean copyVendorTail) { return nativeRecord().saveDat(Objects.requireNonNull(path),copyVendorTail); }
+    public void saveCff(String path, boolean copyVendorTail) {
+        if (!nativeRecord().saveCff(Objects.requireNonNull(path),copyVendorTail)) throw new IllegalStateException("Failed to save CFF");
+    }
+
     public void loadCff(String path) {
         if (!nativeRecord().loadCff(Objects.requireNonNull(path, "path"))) throw new IllegalStateException("Failed to load CFF");
     }
