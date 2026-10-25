@@ -17,6 +17,10 @@ namespace std {
 %ignore ComtradeNativeRecord::nativeCfg;
 %feature("director") ComtradeNativeRowCallback;
 
+// std_except.i alone only maps declared throw specifications. These C++17 methods
+// have none, so install explicit catches and preserve exceptions raised by callbacks.
+%catches(Swig::DirectorException, std::out_of_range, std::invalid_argument, std::overflow_error, std::exception);
+
 // Expose Java-safe facades, not chrono/vector<bool> implementation details.
 %include "java_api.hpp"
 

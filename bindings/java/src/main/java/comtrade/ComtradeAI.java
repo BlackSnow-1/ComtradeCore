@@ -37,6 +37,10 @@ public final class ComtradeAI {
      * {@code configJson} over HTTPS and returns its validated plain-text interpretation. Throws if
      * the model refuses, truncates, requests tools, or returns malformed JSON.
      */
+    public static String summarizeCff(String path, String configJson) {
+        return ComtradeNativeAI.summarizeCff(Objects.requireNonNull(path), Objects.requireNonNull(configJson));
+    }
+
     public static String analyze(String evidenceJson, String configJson) {
         return ComtradeNativeAI.analyze(Objects.requireNonNull(evidenceJson, "evidenceJson"),
                 Objects.requireNonNull(configJson, "configJson"));

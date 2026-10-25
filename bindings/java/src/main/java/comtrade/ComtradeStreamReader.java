@@ -21,6 +21,7 @@ public final class ComtradeStreamReader implements AutoCloseable {
         public final long timeOffsetNanoseconds;
         public final String absoluteTime;
         public final double[] analogValues;
+        public final boolean[] analogMissing;
         public final boolean[] digitalValues;
         /** Index into {@link #getSampleRate}; 0 when the record has no sample-rate segments. */
         public final long segmentIndex;
@@ -37,6 +38,8 @@ public final class ComtradeStreamReader implements AutoCloseable {
             this.timeOffsetNanoseconds = timeOffsetNanoseconds;
             this.absoluteTime = absoluteTime;
             this.analogValues = analogValues;
+            this.analogMissing = new boolean[analogValues.length];
+            for (int i = 0; i < analogValues.length; ++i) this.analogMissing[i] = Double.isNaN(analogValues[i]);
             this.digitalValues = digitalValues;
             this.segmentIndex = segmentIndex;
             this.segmentSampleRate = segmentSampleRate;
@@ -81,6 +84,14 @@ public final class ComtradeStreamReader implements AutoCloseable {
             callback.delete();
         }
     }
+
+    /** Open this reader with a CFF path, then call this method for the embedded DAT. */
+    public long processCffStream(RowHandler handler) { return processDatStream("", handler); }
+    public enum TimeAxisMode { AUTOMATIC, DAT_TIMESTAMPS, SAMPLE_RATES }
+    public void setTimeAxisMode(TimeAxisMode mode) { nativeReader().setTimeAxisMode(Objects.requireNonNull(mode).ordinal()); }
+    public String[] getWarnings() { String text = nativeReader().warnings(); return text.isEmpty() ? new String[0] : text.split("\\n"); }
+    public String getHeader() { return nativeReader().header(); }
+    public String getInformation() { return nativeReader().information(); }
 
     public String getStationName() { return nativeReader().stationName(); }
     public String getDeviceId() { return nativeReader().deviceId(); }

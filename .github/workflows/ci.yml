@@ -188,3 +188,22 @@ jobs:
           path: staging
           if-no-files-found: error
           retention-days: 7
+
+  java-integration:
+    name: Java JNI integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Install JDK and SWIG
+        run: sudo apt-get update && sudo apt-get install -y default-jdk swig
+      - name: Configure Java and core tests
+        run: >-
+          cmake -S . -B build-java -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_JAVA_BINDINGS=ON -DCOMTRADE_BUILD_TESTS=ON
+          -DCOMTRADE_BUILD_EXAMPLES=OFF
+      - run: cmake --build build-java --parallel 2
+      - name: Run actual JVM integration tests
+        run: ctest --test-dir build-java -R 'Java\.' --output-on-failure

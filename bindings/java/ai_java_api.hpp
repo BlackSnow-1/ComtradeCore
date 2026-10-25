@@ -31,6 +31,9 @@ public:
             .dump();
     }
 
+    static std::string summarizeCff(const std::string& path, const std::string& configJson) {
+        return comtrade::ai::summarizeCff(std::filesystem::u8path(path), parseConfig(configJson)).dump();
+    }
     // Sends evidenceJson (as produced by summarize()) to the model configured in configJson and
     // returns its validated plain-text interpretation.
     static std::string analyze(const std::string& evidenceJson, const std::string& configJson) {

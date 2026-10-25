@@ -102,6 +102,19 @@ public final class ComtradeRecord implements AutoCloseable {
 
     private ComtradeNativeRecord nativeRecord = new ComtradeNativeRecord();
 
+    public void loadCff(String path) {
+        if (!nativeRecord().loadCff(Objects.requireNonNull(path, "path"))) throw new IllegalStateException("Failed to load CFF");
+    }
+    public void saveCff(String path) {
+        if (!nativeRecord().saveCff(Objects.requireNonNull(path, "path"))) throw new IllegalStateException("Failed to save CFF");
+    }
+    public String[] getWarnings() { String text = nativeRecord().warnings(); return text.isEmpty() ? new String[0] : text.split("\\n"); }
+    public String getHeader() { return nativeRecord().header(); }
+    public String getInformation() { return nativeRecord().information(); }
+    public void setHeader(String text) { nativeRecord().setHeader(Objects.requireNonNull(text)); }
+    public void setInformation(String text) { nativeRecord().setInformation(Objects.requireNonNull(text)); }
+    public long getTimeOffsetNanoseconds(long index) { return nativeRecord().timeOffsetNanosecondsAt(index); }
+
     public void clear() { nativeRecord().clear(); }
 
     /** Parses CFG metadata and stores the data type required by {@link #parseDat(String)}. */

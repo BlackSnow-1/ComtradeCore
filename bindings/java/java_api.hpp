@@ -37,6 +37,11 @@ inline comtrade::StandardVersion toStandardVersion(const int version_year) {
     }
 }
 
+inline std::string warningsText(const comtrade::Warnings& warnings) {
+    std::string text;
+    for (const auto& w : warnings) text += w.code + ": " + w.message + " [row=" + std::to_string(w.first_row) + ", count=" + std::to_string(w.count) + "]\n";
+    return text;
+}
 inline void validateFinite(const double value, const char* description) {
     if (!std::isfinite(value)) throw std::invalid_argument(std::string(description) + " must be finite");
 }
@@ -60,11 +65,11 @@ inline void validateSampleValues(const comtrade::CfgData& cfg,
         digital_values.size() != cfg.digital_channels.size()) {
         throw std::invalid_argument("sample value counts must match the declared channel counts");
     }
-    for (const double value : analog_values) validateFinite(value, "analog sample value");
+    for (const double value : analog_values) if (std::isinf(value)) throw std::invalid_argument("Infinite analog sample value");
 }
 
 inline std::string formatCfgTime(const comtrade::CfgData& cfg, const comtrade::TimePoint& value) {
-    return comtrade::utils::formatTime(value, cfg.timestamp_fractional_digits);
+    return comtrade::utils::formatTime(value, cfg.timestamp_fractional_digits, cfg.utc_offset_known, cfg.utc_offset_minutes);
 }
 
 }  // namespace comtrade_java_detail
@@ -79,6 +84,20 @@ class ComtradeNativeRecord {
 public:
     ComtradeNativeRecord() = default;
 
+    bool loadCff(const std::string& path) { return record_.loadCff(path); }
+    bool saveCff(const std::string& path) const { return record_.saveCff(path); }
+    std::string warnings() const { return comtrade_java_detail::warningsText(record_.getWarnings()); }
+    std::string header() const { return record_.getHeader(); }
+    std::string information() const { return record_.getInformation(); }
+    void setHeader(const std::string& text) { record_.setHeader(text); }
+    void setInformation(const std::string& text) { record_.setInformation(text); }
+    long long timeOffsetNanosecondsAt(long long index) const {
+        const auto selected = comtrade_java_detail::checkedIndex(index, record_.getData().timestamp.size(), "sample index");
+        const auto& d = record_.getData();
+        if (d.time_offset_ns.size() == d.timestamp.size()) return d.time_offset_ns.at(selected);
+        if (d.timestamp.at(selected) > static_cast<uint64_t>(std::numeric_limits<long long>::max()/1000)) throw std::overflow_error("Time overflow");
+        return static_cast<long long>(d.timestamp.at(selected)*1000);
+    }
     void clear() { record_ = comtrade::Record{}; }
 
     bool parseCfg(const std::string& cfg_path) { return record_.parseCfg(cfg_path); }
@@ -171,6 +190,7 @@ public:
         value.local_code = local_code;
         value.time_quality_code = time_quality_code;
         value.leap_second = leap_second;
+        value.utc_offset_known = comtrade::utils::parseUtcOffset(time_code, value.utc_offset_minutes);
     }
     std::string timeCode() const { return cfg().time_code; }
     std::string localCode() const { return cfg().local_code; }
@@ -352,10 +372,12 @@ public:
         const auto selected = comtrade_java_detail::checkedIndex(
             sample_index, record_.getData().timestamp.size(), "sample index");
         record_.getMutableData().timestamp.at(selected) = checkedTimestamp(timestamp_us);
+        if (record_.getMutableData().time_offset_ns.size() == record_.getData().timestamp.size())
+            record_.getMutableData().time_offset_ns.at(selected) = timestamp_us * 1000;
     }
 
     void setAnalogValueAt(const int channel_index, const long long sample_index, const double value) {
-        comtrade_java_detail::validateFinite(value, "analog sample value");
+        if (std::isinf(value)) throw std::invalid_argument("Infinite analog sample value");
         const auto channel = comtrade_java_detail::checkedIndex(
             channel_index, record_.getData().analog_values.size(), "analog channel index");
         auto& values = record_.getMutableData().analog_values.at(channel);
@@ -375,6 +397,7 @@ public:
         const auto selected = comtrade_java_detail::checkedIndex(
             sample_index, record_.getData().timestamp.size(), "sample index");
         auto& data = record_.getMutableData();
+        if (data.time_offset_ns.size() == data.timestamp.size()) data.time_offset_ns.erase(data.time_offset_ns.begin() + static_cast<std::ptrdiff_t>(selected));
         data.timestamp.erase(data.timestamp.begin() + static_cast<std::ptrdiff_t>(selected));
         for (auto& values : data.analog_values) {
             if (selected < values.size()) values.erase(values.begin() + static_cast<std::ptrdiff_t>(selected));
@@ -477,12 +500,12 @@ private:
         return {samples_per_second, static_cast<std::uint32_t>(end_sample)};
     }
 
-    static std::uint32_t checkedTimestamp(const long long timestamp_us) {
+    static std::uint64_t checkedTimestamp(const long long timestamp_us) {
         if (timestamp_us < 0 || static_cast<unsigned long long>(timestamp_us) >
-                                    std::numeric_limits<std::uint32_t>::max()) {
-            throw std::invalid_argument("timestamp must fit in an unsigned 32-bit microsecond offset");
+                                    static_cast<unsigned long long>(std::numeric_limits<long long>::max()/1000)) {
+            throw std::invalid_argument("timestamp exceeds nanosecond range");
         }
-        return static_cast<std::uint32_t>(timestamp_us);
+        return static_cast<std::uint64_t>(timestamp_us);
     }
 
     const comtrade::CfgData& cfg() const { return record_.getCfg(); }
@@ -521,7 +544,7 @@ public:
     explicit ComtradeNativeStreamReader(const std::string& cfg_path) : reader_(cfg_path) {}
 
     long long processDatStream(const std::string& dat_path, ComtradeNativeRowCallback& callback) const {
-        const auto count = reader_.processDatStream(dat_path, [&](const comtrade::SampleRow& row) {
+        auto consume = [&](const comtrade::SampleRow& row) {
             std::vector<int> digital_values;
             digital_values.reserve(row.digital_values.size());
             for (const bool value : row.digital_values) digital_values.push_back(value ? 1 : 0);
@@ -530,18 +553,27 @@ public:
                            checkedUnsignedLongLong(row.timestamp_us, "timestamp"),
                            static_cast<long long>(row.time_offset.count()),
                            comtrade::utils::formatTime(
-                               row.absolute_time, reader_.getCfg().timestamp_fractional_digits),
+                               row.absolute_time, reader_.getCfg().timestamp_fractional_digits,
+                               reader_.getCfg().utc_offset_known, reader_.getCfg().utc_offset_minutes),
                            row.analog_values,
                            digital_values,
                            static_cast<long long>(row.segment_index),
                            row.segment_sample_rate);
-        });
+        };
+        const auto count = dat_path.empty() ? reader_.processCffStream(consume) : reader_.processDatStream(dat_path, consume);
         if (count > static_cast<std::size_t>(std::numeric_limits<long long>::max())) {
             throw std::overflow_error("parsed row count exceeds Java long range");
         }
         return static_cast<long long>(count);
     }
 
+    std::string warnings() const { return comtrade_java_detail::warningsText(reader_.getWarnings()); }
+    std::string header() const { return reader_.getHeader(); }
+    std::string information() const { return reader_.getInformation(); }
+    void setTimeAxisMode(int mode) {
+        if (mode < 0 || mode > 2) throw std::invalid_argument("Invalid time axis mode");
+        reader_.setReadOptions({static_cast<comtrade::TimeAxisMode>(mode)});
+    }
     std::string stationName() const { return reader_.getCfg().station_name; }
     std::string deviceId() const { return reader_.getCfg().rec_dev_id; }
     int versionYear() const { return static_cast<int>(reader_.getCfg().version); }
@@ -630,11 +662,11 @@ public:
                  const std::vector<double>& analog_values,
                  const std::vector<int>& digital_values) {
         if (timestamp_us < 0 || static_cast<unsigned long long>(timestamp_us) >
-                                    std::numeric_limits<std::uint32_t>::max()) {
-            throw std::invalid_argument("timestamp must fit in an unsigned 32-bit microsecond offset");
+                                    static_cast<unsigned long long>(std::numeric_limits<long long>::max()/1000)) {
+            throw std::invalid_argument("timestamp exceeds nanosecond range");
         }
         comtrade_java_detail::validateSampleValues(cfg_, analog_values, digital_values);
-        writer_.pushRow(static_cast<std::uint32_t>(timestamp_us), analog_values,
+        writer_.pushRow(static_cast<std::uint64_t>(timestamp_us), analog_values,
                         comtrade_java_detail::toDigitalValues(digital_values));
     }
 

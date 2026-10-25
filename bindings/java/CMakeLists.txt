@@ -110,3 +110,21 @@ install(TARGETS ComtradeCoreJava
 install(FILES "${COMTRADE_JAVA_JAR}"
         DESTINATION "${COMTRADE_JAVA_INSTALL_DIR}"
 )
+
+if(COMTRADE_BUILD_TESTS)
+    set(COMTRADE_JAVA_TEST_DIR "${CMAKE_CURRENT_BINARY_DIR}/test-classes")
+    add_custom_command(OUTPUT "${COMTRADE_JAVA_TEST_DIR}/comtrade/ExtensionsTest.class"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${COMTRADE_JAVA_TEST_DIR}"
+        COMMAND "${Java_JAVAC_EXECUTABLE}" -encoding UTF-8 -cp "${COMTRADE_JAVA_JAR}"
+            -d "${COMTRADE_JAVA_TEST_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/src/test/java/comtrade/ExtensionsTest.java"
+        DEPENDS ComtradeCoreJavaJar "${CMAKE_CURRENT_SOURCE_DIR}/src/test/java/comtrade/ExtensionsTest.java"
+        VERBATIM)
+    add_custom_target(ComtradeJavaTests ALL DEPENDS "${COMTRADE_JAVA_TEST_DIR}/comtrade/ExtensionsTest.class")
+    if(WIN32)
+        set(COMTRADE_JAVA_CLASSPATH "${COMTRADE_JAVA_JAR}\;${COMTRADE_JAVA_TEST_DIR}")
+    else()
+        set(COMTRADE_JAVA_CLASSPATH "${COMTRADE_JAVA_JAR}:${COMTRADE_JAVA_TEST_DIR}")
+    endif()
+    add_test(NAME Java.Extensions COMMAND "${Java_JAVA_EXECUTABLE}"
+        "-Djava.library.path=$<TARGET_FILE_DIR:ComtradeCoreJava>" -cp "${COMTRADE_JAVA_CLASSPATH}" comtrade.ExtensionsTest)
+endif()
