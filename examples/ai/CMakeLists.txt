@@ -1,0 +1,13 @@
+foreach(name IN ITEMS local_evidence analyze_report)
+    add_executable(example_ai_${name} ${name}.cpp)
+    target_link_libraries(example_ai_${name} PRIVATE comtrade::ComtradeAI)
+    set_target_properties(example_ai_${name} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+    if(MSVC)
+        target_compile_options(example_ai_${name} PRIVATE /utf-8)
+    endif()
+endforeach()
+if(COMTRADE_BUILD_TESTS)
+    add_test(NAME Examples.ai_local_evidence COMMAND example_ai_local_evidence)
+    set_tests_properties(Examples.ai_local_evidence PROPERTIES LABELS "examples;ai" WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+endif()
+# analyze_report is deliberately excluded from automatic tests: it calls a real model.

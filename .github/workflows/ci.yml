@@ -72,7 +72,7 @@ jobs:
         run: >-
           cmake -S . -B build-ai ${{ matrix.compiler }}
           -DCMAKE_BUILD_TYPE=Release -DCOMTRADE_BUILD_AI=ON
-          -DCOMTRADE_BUILD_TESTS=ON -DCOMTRADE_BUILD_EXAMPLES=OFF
+          -DCOMTRADE_BUILD_TESTS=ON -DCOMTRADE_BUILD_EXAMPLES=ON
           -DCMAKE_DISABLE_FIND_PACKAGE_GTest=ON
           "-DCMAKE_POLICY_VERSION_MINIMUM=3.10"
           -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/staging-ai"
@@ -167,6 +167,9 @@ jobs:
       - name: Run unit tests
         run: ctest --test-dir build -C Release -L unit --no-tests=error --output-on-failure --output-junit unit-tests.xml
 
+      - name: Run standalone core examples
+        run: ctest --test-dir build -C Release -L examples --no-tests=error --output-on-failure
+
       - name: Run real COMTRADE accuracy tests
         if: ${{ !cancelled() && steps.core-build.outcome == 'success' }}
         run: ctest --test-dir build -C Release -L accuracy --no-tests=error --output-on-failure --output-junit accuracy-tests.xml
@@ -221,7 +224,7 @@ jobs:
         run: >-
           cmake -S . -B build-java -DCMAKE_BUILD_TYPE=Release
           -DBUILD_JAVA_BINDINGS=ON -DCOMTRADE_BUILD_TESTS=ON
-          -DCOMTRADE_BUILD_EXAMPLES=OFF
+          -DCOMTRADE_BUILD_EXAMPLES=ON
       - run: cmake --build build-java --parallel 2
-      - name: Run actual JVM integration tests
+      - name: Run actual JVM integration tests and examples
         run: ctest --test-dir build-java -R 'Java\.' --output-on-failure

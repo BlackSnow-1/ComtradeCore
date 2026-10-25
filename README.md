@@ -33,6 +33,12 @@ IEEE/IEC C37.111-2013 CFG 支持采样率段、时间倍率、小数秒精度、
 时间质量码和闰秒指示；当 `nrates=0` 时，可读取并保持后续0到任意数量的采样率段。
 下一版 PC37.111 仍在制定中，尚无可据以实现的正式发布版本。
 
+## 可运行示例
+
+[`examples/README.md`](examples/README.md) 提供完整构建与运行命令，以及 C++ / Java 场景索引：
+四种 DAT 编码、CFF、流式处理、时间轴与时区、缺失值和警告、厂家尾部、实际文件检查及可选 AI 分析。
+新场景会自行生成演示数据，默认写入独立输出目录，不需要下载测试录波；离线 AI 示例不会调用模型。
+
 ## 生成 COMTRADE 文件
 
 下面的示例生成一组 ASCII 格式的 `record.cfg` 和 `record.dat`：
@@ -993,7 +999,17 @@ ComtradeCore/
 ├── examples/
 │   ├── CMakeLists.txt
 │   ├── example_high_perf_write.cpp # 高性能写入示例
-│   └── record_lifecycle.cpp       # Record 生命周期示例
+│   ├── record_lifecycle.cpp       # Record 生命周期示例
+│   ├── README.md                 # 完整场景索引与运行命令
+│   ├── record_formats.cpp        # 四种编码读写与编辑
+│   ├── stream_processing.cpp     # 恒定内存流式处理
+│   ├── cff_roundtrip.cpp         # CFF/HDR/INF 与纳秒精度
+│   ├── time_axis.cpp             # 时间轴策略与 UTC
+│   ├── missing_and_warnings.cpp  # 缺失值与损坏数据恢复
+│   ├── vendor_tail.cpp           # 厂家尾部处理
+│   ├── inspect_record.cpp        # 检查实际 CFG/DAT/CFF
+│   ├── ai/                       # 离线证据与显式模型/PDF 请求
+│   └── java/                     # Java 可运行使用示例
 ├── include/comtrade/
 │   ├── binary_io.hpp              # 二进制 DAT 布局与小端转换
 │   ├── cfg_io.hpp                 # CFG 解析工具
