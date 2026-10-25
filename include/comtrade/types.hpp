@@ -26,7 +26,19 @@ namespace comtrade {
         warnings.push_back({code, message, row, 1});
     }
     enum class TimeAxisMode { Automatic, DatTimestamps, SampleRates };
-    struct ReadOptions { TimeAxisMode time_axis = TimeAxisMode::Automatic; };
+    enum class DatTailPolicy { AfterCfgSamples, ParseToEnd };
+    struct ReadOptions {
+        TimeAxisMode time_axis = TimeAxisMode::Automatic;
+        DatTailPolicy dat_tail_policy = DatTailPolicy::AfterCfgSamples;
+        size_t max_retained_tail_bytes = 1024 * 1024;
+    };
+    // Offset is relative to the DAT payload, including when embedded in a CFF.
+    // Bytes are opaque: they may contain NULs, checksums, or a vendor-specific encoding.
+    struct DatTail {
+        uint64_t offset = 0, byte_count = 0;
+        std::string bytes;
+        bool truncated = false;
+    };
     // CFG 的开始/触发时刻保留纳秒精度；DAT 中的时间戳则是相对开始时刻的偏移。
     using TimePoint = std::chrono::time_point<std::chrono::system_clock, std::chrono::nanoseconds>;
 

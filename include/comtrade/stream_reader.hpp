@@ -11,6 +11,7 @@
 #include "types.hpp"
 #include "utils.hpp"
 
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -61,10 +62,17 @@ public:
         warnings_ = cfg_.warnings;
     }
     explicit StreamReader(CfgData cfg, ReadOptions options = {}) : cfg_(std::move(cfg)), options_(options), warnings_(cfg_.warnings) {}
+    const DatTail& getDatTail() const noexcept { return dat_tail_; }
+    // Invoked synchronously for every tail chunk, even beyond the retention limit.
+    // The caller must copy bytes it needs after the callback returns; exceptions propagate.
+    void setDatTailHandler(std::function<void(const char*, size_t, uint64_t)> handler) {
+        tail_handler_ = std::move(handler);
+    }
     uint64_t getPhysicalRowCount() const noexcept { return physical_rows_; }
     const Warnings& getWarnings() const noexcept { return warnings_; }
     const std::string& getHeader() const noexcept { return hdr_; }
     const std::string& getInformation() const noexcept { return inf_; }
+    const ReadOptions& getReadOptions() const noexcept { return options_; }
     void setReadOptions(ReadOptions options) { options_ = options; }
     bool isCff() const noexcept { return !cff_path_.empty(); }
     size_t processCffStream(const std::function<void(const SampleRow&)>& callback) const {
@@ -87,12 +95,12 @@ public:
     size_t processDatStream(const std::string& dat_filepath,
                             const std::function<void(const SampleRow&)>& on_row_parsed) const {
         std::ifstream input(dat_filepath, std::ios::binary);
-        if (!input) { warnings_ = cfg_.warnings; addWarning(warnings_, "dat.open", "Cannot open DAT"); return 0; }
+        if (!input) { dat_tail_ = {}; physical_rows_ = 0; warnings_ = cfg_.warnings; addWarning(warnings_, "dat.open", "Cannot open DAT"); return 0; }
         return processStream(input, on_row_parsed);
     }
     size_t processStream(std::istream& input, const std::function<void(const SampleRow&)>& callback,
                          uint64_t byte_limit = std::numeric_limits<uint64_t>::max()) const {
-        warnings_ = cfg_.warnings; physical_rows_ = 0;
+        warnings_ = cfg_.warnings; physical_rows_ = 0; dat_tail_ = {};
         if (!std::isfinite(cfg_.time_multiplier) || cfg_.time_multiplier <= 0 ||
             cfg_.analog_count < 0 || cfg_.digital_count < 0 ||
             cfg_.analog_channels.size() != static_cast<size_t>(cfg_.analog_count) ||
@@ -116,6 +124,31 @@ public:
     }
 
 private:
+    uint64_t declaredSampleEnd() const noexcept {
+        if (options_.dat_tail_policy == DatTailPolicy::ParseToEnd || cfg_.sample_rates.empty()) return 0;
+        return cfg_.sample_rates.back().end_sample;
+    }
+    void readDatTail(std::istream& input, uint64_t consumed, uint64_t byte_limit) const {
+        dat_tail_.offset = consumed;
+        std::array<char, 65536> buffer{};
+        while (consumed < byte_limit && input) {
+            const auto requested = static_cast<std::streamsize>(std::min<uint64_t>(buffer.size(), byte_limit-consumed));
+            input.read(buffer.data(), requested);
+            const auto length = static_cast<size_t>(input.gcount());
+            if (!length) break;
+            const auto retained = std::min(length, options_.max_retained_tail_bytes-dat_tail_.bytes.size());
+            dat_tail_.bytes.append(buffer.data(), retained);
+            dat_tail_.byte_count += length;
+            if (tail_handler_) tail_handler_(buffer.data(), length, consumed);
+            consumed += length;
+        }
+        dat_tail_.truncated = dat_tail_.byte_count > dat_tail_.bytes.size();
+        if (dat_tail_.byte_count)
+            addWarning(warnings_, "dat.vendor_tail", "Bytes after CFG sample boundary retained as opaque DAT tail; verify CFG count if additional samples were expected");
+        if (dat_tail_.truncated)
+            addWarning(warnings_, "dat.vendor_tail_limit", "Tail retention limit reached; use the chunk callback to extract the complete tail");
+    }
+
     // 按 DAT 采样序号定位采样段；跳过坏行后也保留原始段边界。DAT 严格按序
     // 流式产生，序号只会单调增加，因此 cursor 只需单向前移；整份文件的定位总代价是
     // O(采样段数)，不会随采样点数增长，保持流式处理原有的常数级内存和线性时间特征。
@@ -237,6 +270,10 @@ private:
             updateSegment(row_buffer, segment_cursor, row_buffer.index);
             on_row_parsed(row_buffer);
             ++parsed_count;
+            if (declaredSampleEnd() && row_buffer.index == declaredSampleEnd()) {
+                readDatTail(dat_file, consumed, byte_limit);
+                break;
+            }
         }
 
         return parsed_count;
@@ -258,7 +295,12 @@ private:
             const char* cursor = encoded_row.data();
             row_buffer.index = detail::readUint32LittleEndian(cursor);
             row_buffer.raw_timestamp = detail::readUint32LittleEndian(cursor);
-            if (!populateTimeFields(row_buffer)) continue;
+            if (!populateTimeFields(row_buffer)) {
+                if (declaredSampleEnd() && physical_rows_ == declaredSampleEnd()) {
+                    readDatTail(dat_file, consumed, byte_limit); return parsed_count;
+                }
+                continue;
+            }
 
             // BINARY、BINARY32 和 FLOAT32 仅改变模拟量原始字段宽度；工程量换算规则一致。
             for (std::size_t i = 0; i < analog_count; ++i) {
@@ -289,6 +331,9 @@ private:
             updateSegment(row_buffer, segment_cursor, row_buffer.index);
             on_row_parsed(row_buffer);
             ++parsed_count;
+            if (declaredSampleEnd() && physical_rows_ == declaredSampleEnd()) {
+                readDatTail(dat_file, consumed, byte_limit); return parsed_count;
+            }
         }
 
         if ((dat_file.gcount() > 0 && static_cast<size_t>(dat_file.gcount()) < row_size) ||
@@ -301,6 +346,8 @@ private:
     ReadOptions options_;
     mutable Warnings warnings_;
     mutable uint64_t physical_rows_ = 0;
+    mutable DatTail dat_tail_;
+    std::function<void(const char*, size_t, uint64_t)> tail_handler_;
     std::string cff_path_, hdr_, inf_;
     std::streamoff cff_offset_ = 0;
     uint64_t cff_bytes_ = 0;

@@ -54,7 +54,15 @@ namespace comtrade {
             if (!input) return false;
             return readSamples(reader, [&](const auto& callback) { return reader.processStream(input, callback); });
         }
+        const DatTail& getDatTail() const noexcept { return dat_tail_; }
+        bool saveDatTail(const std::string& path) const {
+            if (dat_tail_.truncated) return false;
+            std::ofstream out(path, std::ios::binary);
+            out.write(dat_tail_.bytes.data(), static_cast<std::streamsize>(dat_tail_.bytes.size()));
+            out.flush(); return bool(out);
+        }
         const Warnings& getWarnings() const noexcept { return warnings_; }
+        const ReadOptions& getReadOptions() const noexcept { return options_; }
         void setReadOptions(ReadOptions options) { options_ = options; }
         const std::string& getHeader() const noexcept { return header_; }
         const std::string& getInformation() const noexcept { return information_; }
@@ -70,10 +78,10 @@ namespace comtrade {
                 *this = std::move(loaded); return true;
             } catch (const std::exception&) { return false; }
         }
-        bool saveCff(const std::string& path) const {
+        bool saveCff(const std::string& path, bool preserve_vendor_tail = false) const {
             if (cfg_.version != StandardVersion::V2013) return false;
             std::ostringstream cfg, dat(std::ios::out | std::ios::binary);
-            if (!writeCfg(cfg) || !writeDat(dat)) return false;
+            if (!writeCfg(cfg) || !writeDat(dat, preserve_vendor_tail)) return false;
             std::ofstream out(path, std::ios::binary);
             if (!out) return false;
             out << "--- file type: CFG ---\r\n" << cfg.str();
@@ -153,12 +161,14 @@ namespace comtrade {
             return bool(out);
         }
 
-        [[nodiscard]] inline bool saveDat(const std::string &filepath) const {
+        [[nodiscard]] inline bool saveDat(const std::string &filepath, bool preserve_vendor_tail = false) const {
+            if (preserve_vendor_tail && dat_tail_.truncated) return false;
             std::ofstream out(filepath, std::ios::binary);
             if (!out) return false;
-            const bool ok = writeDat(out); out.flush(); return ok && bool(out);
+            const bool ok = writeDat(out, preserve_vendor_tail); out.flush(); return ok && bool(out);
         }
-        bool writeDat(std::ostream& output) const {
+        bool writeDat(std::ostream& output, bool preserve_vendor_tail = false) const {
+            if (preserve_vendor_tail && dat_tail_.truncated) return false;
             if (!std::isfinite(cfg_.time_multiplier) || cfg_.time_multiplier <= 0.0) return false;
 
             const auto num_samples = data_.timestamp.size();
@@ -194,6 +204,13 @@ namespace comtrade {
                     else writer.pushRow(data_.timestamp[sample], analog_row, digital_row);
                 }
                 writer.close();
+                if (dat_tail_.byte_count) {
+                    if (preserve_vendor_tail) {
+                        output.write(dat_tail_.bytes.data(), static_cast<std::streamsize>(dat_tail_.bytes.size()));
+                        addWarning(warnings_, "dat.vendor_tail_copied", "Opaque tail copied unchanged; vendor checksums/offsets were not recalculated");
+                    } else addWarning(warnings_, "dat.vendor_tail_omitted", "Standard DAT output excludes the retained vendor tail; export it separately or explicitly request copying");
+                }
+                if (!output) return false;
             } catch (const std::exception&) {
                 return false;
             }
@@ -285,10 +302,11 @@ namespace comtrade {
                     for (size_t i=0;i<row.digital_values.size();++i) decoded.digital_values[i].push_back(row.digital_values[i]);
                 });
             } catch (const std::exception&) { return false; }
-            data_ = std::move(decoded); warnings_ = reader.getWarnings(); return true;
+            data_ = std::move(decoded); dat_tail_ = reader.getDatTail(); warnings_ = reader.getWarnings(); return true;
         }
         ReadOptions options_;
-        Warnings warnings_;
+        mutable Warnings warnings_;
+        DatTail dat_tail_;
         std::string header_, information_;
         CfgData cfg_;
         RecordData data_;
