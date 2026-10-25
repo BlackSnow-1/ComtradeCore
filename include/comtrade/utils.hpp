@@ -48,6 +48,7 @@ namespace comtrade::utils {
         const auto display = tp + std::chrono::minutes(utc ? offset_minutes : 0);
         auto secs = std::chrono::time_point_cast<std::chrono::seconds>(display);
         auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(display - secs).count();
+        if (ns < 0) { secs -= std::chrono::seconds(1); ns += 1000000000LL; }
 
         std::time_t t = std::chrono::system_clock::to_time_t(secs);
         std::tm tm_buf;

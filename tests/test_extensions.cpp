@@ -104,4 +104,25 @@ TEST(Extensions, WriterDetectsOutputFailure) {
     StreamWriter writer(configuration()); std::ostringstream out; writer.open(out); out.setstate(std::ios::badbit);
     EXPECT_THROW(writer.pushRow(0,{5},{}),std::runtime_error);
 }
+TEST(Extensions, AppendingAfterLoadPreservesSubMicrosecondTimes) {
+    Record r; r.getMutableCfg()=configuration();
+    r.addSample(0,{5},{}); r.getMutableData().time_offset_ns[0]=125;
+    r.addSample(1000,{7},{});
+    EXPECT_EQ(r.getData().time_offset_ns[0],125); EXPECT_EQ(r.getData().time_offset_ns.size(),2u);
+    EXPECT_THROW(r.addSample(2000,{},{}),std::invalid_argument);
+}
+TEST(Extensions, OptionalInvalidNumbersRecoverWithWarnings) {
+    Record r; r.getMutableCfg()=configuration(); std::ostringstream output; ASSERT_TRUE(r.writeCfg(output));
+    auto text=output.str(); auto position=text.find(",0,0,0,1,1,P");
+    ASSERT_NE(position,std::string::npos); text.replace(position,2,",bad");
+    std::vector<std::string> lines; std::istringstream in(text); std::string line;
+    while(std::getline(in,line)) lines.push_back(line);
+    CfgData cfg; ASSERT_TRUE(detail::parseCfgLines(lines,cfg));
+    EXPECT_EQ(cfg.analog_channels[0].skew,0); EXPECT_TRUE(warned(cfg.warnings,"cfg.optional_default"));
+}
+TEST(Extensions, PreEpochTimesKeepPositiveFraction) {
+    const auto time=utils::parseTime("31/12/1969,23:59:59.123456789",true);
+    EXPECT_EQ(utils::formatTime(time,9,true),"31/12/1969,23:59:59.123456789");
+}
+
 }

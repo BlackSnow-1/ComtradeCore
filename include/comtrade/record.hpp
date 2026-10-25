@@ -136,8 +136,10 @@ namespace comtrade {
             for (const auto& sample_rate : sample_rates) {
                 out << sample_rate.samples_per_second << "," << sample_rate.end_sample << "\r\n";
             }
-            out << utils::formatTime(cfg_.start_time, cfg_.timestamp_fractional_digits, cfg_.utc_offset_known, cfg_.utc_offset_minutes) << "\r\n";
-            out << utils::formatTime(cfg_.trigger_time, cfg_.timestamp_fractional_digits, cfg_.utc_offset_known, cfg_.utc_offset_minutes) << "\r\n";
+            int offset_minutes = 0;
+            const bool known_offset = cfg_.version == StandardVersion::V2013 && utils::parseUtcOffset(cfg_.time_code, offset_minutes);
+            out << utils::formatTime(cfg_.start_time, cfg_.timestamp_fractional_digits, known_offset, offset_minutes) << "\r\n";
+            out << utils::formatTime(cfg_.trigger_time, cfg_.timestamp_fractional_digits, known_offset, offset_minutes) << "\r\n";
             out << DataTypeUtils::ToString(cfg_.data_type) << "\r\n";
 
             if (cfg_.version != StandardVersion::V1991) {
@@ -148,7 +150,7 @@ namespace comtrade {
                 out << cfg_.time_quality_code << "," << cfg_.leap_second << "\r\n";
             }
 
-            return true;
+            return bool(out);
         }
 
         [[nodiscard]] inline bool saveDat(const std::string &filepath) const {
@@ -225,6 +227,12 @@ namespace comtrade {
                               const std::vector<bool> &digital_vals) {
             // timestamp_us 是相对 cfg_.start_time 的偏移，不是 Unix epoch 时间。
             // 调用方应为每个已声明通道提供一个值，缺少的列不会被自动补零。
+            if (timestamp_us > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()/1000))
+                throw std::overflow_error("Sample exceeds nanosecond time range");
+            if (analog_reals.size() != cfg_.analog_channels.size() || digital_vals.size() != cfg_.digital_channels.size())
+                throw std::invalid_argument("Sample value counts must match declared channels");
+            if (data_.time_offset_ns.size() == data_.timestamp.size())
+                data_.time_offset_ns.push_back(static_cast<int64_t>(timestamp_us*1000));
             data_.timestamp.push_back(timestamp_us);
 
             if (data_.analog_values.empty() && cfg_.analog_count > 0) {
@@ -248,6 +256,7 @@ namespace comtrade {
          * @param trigger_time 触发动作时间 (纳秒级 TimePoint)
          */
         inline void setTimestamps(const TimePoint &start_time, const TimePoint &trigger_time) {
+            cfg_.utc_offset_known = cfg_.version == StandardVersion::V2013 && utils::parseUtcOffset(cfg_.time_code, cfg_.utc_offset_minutes);
             cfg_.start_time = start_time;
             cfg_.trigger_time = trigger_time;
         }

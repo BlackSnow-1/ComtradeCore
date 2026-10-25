@@ -58,8 +58,10 @@ public:
             cff_path_ = path; cff_offset_ = cff.dat_offset;
             cff_bytes_ = cff.dat_bytes; cff_bounded_ = cff.has_byte_count;
         } else if (!detail::parseCfgFile(path, cfg_)) throw std::runtime_error("Invalid CFG: " + path);
+        warnings_ = cfg_.warnings;
     }
-    explicit StreamReader(CfgData cfg, ReadOptions options = {}) : cfg_(std::move(cfg)), options_(options) {}
+    explicit StreamReader(CfgData cfg, ReadOptions options = {}) : cfg_(std::move(cfg)), options_(options), warnings_(cfg_.warnings) {}
+    uint64_t getPhysicalRowCount() const noexcept { return physical_rows_; }
     const Warnings& getWarnings() const noexcept { return warnings_; }
     const std::string& getHeader() const noexcept { return hdr_; }
     const std::string& getInformation() const noexcept { return inf_; }
@@ -90,7 +92,7 @@ public:
     }
     size_t processStream(std::istream& input, const std::function<void(const SampleRow&)>& callback,
                          uint64_t byte_limit = std::numeric_limits<uint64_t>::max()) const {
-        warnings_ = cfg_.warnings;
+        warnings_ = cfg_.warnings; physical_rows_ = 0;
         if (!std::isfinite(cfg_.time_multiplier) || cfg_.time_multiplier <= 0 ||
             cfg_.analog_count < 0 || cfg_.digital_count < 0 ||
             cfg_.analog_channels.size() != static_cast<size_t>(cfg_.analog_count) ||
@@ -114,7 +116,7 @@ public:
     }
 
 private:
-    // 按物理采样序号（第一个有效采样点为 1）在 sample_rates 中定位当前采样段。DAT 严格按序
+    // 按 DAT 采样序号定位采样段；跳过坏行后也保留原始段边界。DAT 严格按序
     // 流式产生，序号只会单调增加，因此 cursor 只需单向前移；整份文件的定位总代价是
     // O(采样段数)，不会随采样点数增长，保持流式处理原有的常数级内存和线性时间特征。
     void updateSegment(SampleRow& row, std::size_t& cursor, uint64_t physical_ordinal) const {
@@ -123,6 +125,7 @@ private:
             row.segment_sample_rate = 0.0;
             return;
         }
+        if (cursor > 0 && physical_ordinal <= cfg_.sample_rates[cursor-1].end_sample) cursor = 0;
         while (cursor + 1 < cfg_.sample_rates.size() && physical_ordinal > cfg_.sample_rates[cursor].end_sample)
             ++cursor;
         row.segment_index = cursor;
@@ -185,7 +188,7 @@ private:
         uint64_t physical_row = 0, consumed = 0;
         while (consumed < byte_limit && std::getline(dat_file, line)) {
             consumed += line.size() + (dat_file.eof() ? 0 : 1);
-            ++physical_row;
+            ++physical_row; physical_rows_ = physical_row;
             if (consumed > byte_limit) { addWarning(warnings_, "dat.partial_row", "CFF limit cuts an ASCII row", physical_row); break; }
             if (first_line) {
                 detail::stripUtf8Bom(line);
@@ -251,7 +254,7 @@ private:
         std::size_t segment_cursor = 0;
         uint64_t consumed = 0;
         while (byte_limit - consumed >= row_size && dat_file.read(encoded_row.data(), static_cast<std::streamsize>(encoded_row.size()))) {
-            consumed += row_size;
+            consumed += row_size; ++physical_rows_;
             const char* cursor = encoded_row.data();
             row_buffer.index = detail::readUint32LittleEndian(cursor);
             row_buffer.raw_timestamp = detail::readUint32LittleEndian(cursor);
@@ -297,6 +300,7 @@ private:
     CfgData cfg_;
     ReadOptions options_;
     mutable Warnings warnings_;
+    mutable uint64_t physical_rows_ = 0;
     std::string cff_path_, hdr_, inf_;
     std::streamoff cff_offset_ = 0;
     uint64_t cff_bytes_ = 0;

@@ -46,6 +46,24 @@ inline bool tryParseSampleRate(const std::string& line, SampleRate& sample_rate)
     }
 }
 
+// Optional metadata is recoverable; invalid conversion is never silently accepted.
+template<class T>
+inline void optionalNumber(const std::vector<std::string>& fields, size_t index, T& value,
+                           Warnings& warnings, uint64_t row) {
+    if (index >= fields.size() || fields[index].empty()) {
+        addWarning(warnings, "cfg.optional_default", "Missing optional channel number; using default", row); return;
+    }
+    try {
+        size_t used = 0; const double parsed = std::stod(fields[index], &used);
+        if (!std::isfinite(parsed) || used != fields[index].size() ||
+            parsed < static_cast<double>(std::numeric_limits<T>::lowest()) ||
+            parsed > static_cast<double>(std::numeric_limits<T>::max())) throw std::invalid_argument("Invalid metadata");
+        value = static_cast<T>(parsed);
+    } catch (const std::exception&) {
+        addWarning(warnings, "cfg.optional_default", "Invalid optional channel number; using default", row);
+    }
+}
+
 // 使用局部 parsed_cfg 进行事务式解析：只有所有必需字段都合法时才覆盖输出 cfg。
 inline bool parseCfgLines(const std::vector<std::string>& lines, CfgData& cfg) {
     if (lines.size() < 2) return false;
@@ -87,11 +105,11 @@ inline bool parseCfgLines(const std::vector<std::string>& lines, CfgData& cfg) {
         if (tokens.size() > 4) channel.uu = tokens[4];
         channel.a = std::stod(tokens[5]);
         channel.b = std::stod(tokens[6]);
-        if (tokens.size() > 7 && !tokens[7].empty()) channel.skew = std::stod(tokens[7]);
-        if (tokens.size() > 8 && !tokens[8].empty()) channel.min = std::stoi(tokens[8]);
-        if (tokens.size() > 9 && !tokens[9].empty()) channel.max = std::stoi(tokens[9]);
-        if (tokens.size() > 10 && !tokens[10].empty()) channel.primary = std::stod(tokens[10]);
-        if (tokens.size() > 11 && !tokens[11].empty()) channel.secondary = std::stod(tokens[11]);
+        optionalNumber(tokens, 7, channel.skew, parsed_cfg.warnings, cursor+1);
+        optionalNumber(tokens, 8, channel.min, parsed_cfg.warnings, cursor+1);
+        optionalNumber(tokens, 9, channel.max, parsed_cfg.warnings, cursor+1);
+        optionalNumber(tokens, 10, channel.primary, parsed_cfg.warnings, cursor+1);
+        optionalNumber(tokens, 11, channel.secondary, parsed_cfg.warnings, cursor+1);
         if (tokens.size() > 12) channel.ps = tokens[12];
         parsed_cfg.analog_channels.push_back(std::move(channel));
     }
@@ -107,12 +125,17 @@ inline bool parseCfgLines(const std::vector<std::string>& lines, CfgData& cfg) {
         channel.id = tokens[1];
         if (tokens.size() > 2) channel.phase = tokens[2];
         if (tokens.size() > 3) channel.ccbm = tokens[3];
-        if (tokens.size() > 4) channel.normal_state = std::stoi(tokens[4]);
+        optionalNumber(tokens, 4, channel.normal_state, parsed_cfg.warnings, cursor+1);
         parsed_cfg.digital_channels.push_back(std::move(channel));
     }
 
     if (cursor >= lines.size()) return false;
-    parsed_cfg.line_frequency = std::stod(lines[cursor++]);
+    try {
+        size_t used = 0; const double frequency = std::stod(lines[cursor], &used);
+        if (!std::isfinite(frequency) || frequency <= 0 || used != lines[cursor].find_last_not_of(" \r\n") + 1) throw std::invalid_argument("frequency");
+        parsed_cfg.line_frequency = frequency;
+    } catch (...) { addWarning(parsed_cfg.warnings, "cfg.frequency", "Invalid nominal frequency; using 50 Hz", cursor+1); }
+    ++cursor;
 
     if (cursor >= lines.size()) return false;
     const int sample_rate_count = std::stoi(lines[cursor++]);
