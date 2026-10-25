@@ -181,7 +181,7 @@ OpenSSL 3.x。发布的 Windows AI 包附带构建环境的 TLS DLL；Linux/macO
   `summarize()` 目前仍按固定 `windowMs` 时长摘要，如果需要按采样段边界（而不是固定时长）分别统计，
   可以在回调里读取这两个字段自行分段，不需要重新做二分查找。
 - 数字量保留初末状态、总变位次数及前 `maxDigitalEvents` 个事件，明确报告省略数。
-- 非递增时间、采样序号断续、非有限值、CFG/物理行数不符都显式报告。残缺二进制行直接拒绝。
+- 非递增时间、采样序号断续、非有限值、CFG/物理行数不符都显式报告。摘要模式保留完整二进制行并警告；full 模式拒绝残缺尾行。
 - summary 内存随通道数、窗口数、事件上限增长；完整模式按 `maxWaveformSamples` 和字节预算限制，超限失败而非截断。
 - `waveformMode: full` 额外发送每个有效采样，列顺序为 sampleIndex/rawTimestamp/timeOffsetNs/模拟量/数字量。
   完整模式拒绝物理行数与解析数不符、CFG 数量不符、非有限模拟量；不自动抽样或分批请求。
@@ -206,3 +206,12 @@ Linux 额外用 [`tests/verify_pdf.py`](../tests/verify_pdf.py) 借助 Poppler �
 CI 为 Linux GCC/Clang、Windows MSVC、macOS Clang 构建 AI 并执行安装后 CMake 消费者测试；
 原有无 AI 核心矩阵继续运行。Release 复用全部 CI，所有作业通过后才打标签并发布已验证的构建附件。
 真实付费模型不参与自动测试，无需真实 token。
+
+
+### CFF 与解析警告（schemaVersion 3）
+
+`summarizeCff(path, config)` 直接读取 CFF；CLI 可省略独立 DAT 参数。SHA-256 的 CFG/DAT 字段此时均为
+整个 CFF 文件的哈希，表示同一输入容器。新增 `parserWarnings`（code/message/firstRow/count）和
+`utcOffsetKnown`。缺失模拟量不参加统计，计入 nonFiniteValues；全缺失通道仅输出 count=0。
+时间轴默认对缺失时间重建并警告，timeCode 决定 UTC 偏移，localCode 仅作元数据。
+摘要模式尽量恢复；full 模式仍拒绝残缺数据和非有限值。完整性校验不是标准合规认证。

@@ -1061,3 +1061,59 @@ SWIG 生成的 Java 代理和 C++ JNI 包装代码位于所选构建目录的 `b
 该值用于防止读取结果被编译器无效优化并检查多轮结果是否稳定，不代表 COMTRADE 数据本身的业务含义。
 性能数据会受到 CPU 动态调频、系统负载、编译器版本和存储介质影响，因此应在相同环境和构建类型下
 比较不同版本。
+
+
+## CFF、时间轴和容错警告
+
+支持直接读取 2013 CFF（CFG/INF/HDR/DAT），DAT 可为四种现有编码。二进制 DAT 按标记中的字节数读取，
+不对二进制载荷扫描文本分隔符。INF/HDR 保留为文本，不解释厂商字段。Record 可保存 CFF，要求版本为 2013；
+流式读取直接访问 CFF 原文件，Record 写 CFF 会在内存中序列化数据。
+
+```cpp
+comtrade::Record record;
+if (!record.loadCff("record.cff")) throw std::runtime_error("Cannot load CFF");
+for (const auto& warning : record.getWarnings()) {
+    std::cerr << warning.code << ": " << warning.message
+              << " firstRow=" << warning.first_row << " count=" << warning.count << '\n';
+}
+record.setHeader("Operator notes");
+record.saveCff("copy.cff");
+
+comtrade::StreamReader reader("record.cff");
+reader.processCffStream([](const comtrade::SampleRow& row) {
+    // analog_missing 标记缺失模拟量，analog_values 中对应值为 NaN。
+    // time_offset / timestamp_reconstructed 表示实际采用的时间轴及其来源。
+});
+```
+
+默认 Automatic 保留可用的 DAT 时间戳，对空时间戳、二进制 0xFFFFFFFF、首点之后的零时间戳尝试根据
+原始采样序号和分段采样率重建，并产生 `dat.time_reconstructed` 警告。跨段采用当前采样点所属段的间隔。
+无法重建且无可用时间时跳过该采样并警告；零时间戳缺乏有效采样率时原样保留并警告。
+可通过 `ReadOptions::time_axis` 选择 `DatTimestamps` 或 `SampleRates`，分别强制保留 DAT 时间或使用采样率。
+采样段按 DAT 序号定位，跳过坏行不会移动段边界。
+
+2013 的 `time_code`（如 `+8`、`-7h15`、`0`，亦接受厂商的 `UTC`、`+0800`、`+08:00`）参与 UTC 换算；
+`local_code` 不再次修正时间。旧版本或不可识别的 time_code 继续按机器本地时区解释，并给出
+`cfg.timezone_unknown`，调用方不得把它当作已确认的 UTC 时刻。闰秒状态保留并警告，不自动修正。
+
+缺失模拟量读取时转为 NaN，写入时转回对应编码的标记：1991 ASCII 为空、1991 BINARY 为 0xFFFF；
+较新 ASCII 为 99999、BINARY 为 -32768、BINARY32 为 INT32_MIN、FLOAT32 为负最大有限浮点数。
+无穷值不能写入；有效数值若与缺失标记碰撞则拒绝写入，避免静默丢失数据。
+
+校验以恢复读取为原则：通道总数不符时按 A/D 数纠正；可选时间字段缺失时使用默认值；坏行、残缺尾行、
+序号断续、时间倒退和缺失值均记录警告。无法确定结构、无法解析的关键日期以及未知 DAT 编码仍然失败。
+警告按 code 聚合，记录首个位置和总次数；位置 0 表示文件或配置级问题。每次流式读取重置上次读取警告。
+C++ 回调的异常直接向外传播，不当作坏行吞掉；同一 Reader 不支持并发处理。
+
+`RecordData::timestamp` 升为 uint64 微秒，另有 `time_offset_ns` 保留精确纳秒偏移。修改公开容器后必须保持
+各通道长度一致；写入时仅在纳秒列与微秒列一致时采用纳秒列。此类型调整可能需要 C++ 调用方修改显式声明的
+`vector<uint32_t>`。写入 DAT 的时间上限还受所选编码的原始时间戳宽度约束。
+
+Java 同步提供 `loadCff/saveCff`、`getWarnings`、HDR/INF 文本、`getTimeOffsetNanoseconds`，
+流式 Reader 提供 `processCffStream` 和 `setTimeAxisMode`。模拟量允许 Double.NaN；SampleRow.analogMissing
+指示缺失。Java long 的时间参数仍检查纳秒范围。新增 Java 测试实际加载 JNI 动态库并验证异常和回调。
+
+AI 的 `summarizeCff(path, config)` 与 Java `ComtradeAI.summarizeCff` 可直接汇总 CFF。
+CLI 支持 `comtrade-ai summarize config.json input.cff output.json`（analyze 同样适用）。
+证据 schemaVersion 为 3，新增结构化 `parserWarnings` 和 `utcOffsetKnown`。摘要模式遇到坏行或残缺尾行
+保留完整采样并警告；full 模式拒绝残缺或非有限值。警告会进入模型证据和 PDF，CLI 同时输出到 stderr。
