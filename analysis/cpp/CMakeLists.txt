@@ -112,6 +112,10 @@ if(COMTRADE_AI_PDF_FETCHED)
         $<BUILD_INTERFACE:${ai_pdf_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${ai_pdf_BINARY_DIR}/include>)
 endif()
+if(MINGW)
+    # Header-only JSON/HTTP/PDF consumers can exceed COFF's section limit in Debug.
+    target_compile_options(ComtradeAI INTERFACE -Wa,-mbig-obj)
+endif()
 if(WIN32)
     target_link_libraries(ComtradeAI INTERFACE ws2_32 crypt32)
 endif()

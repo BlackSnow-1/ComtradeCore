@@ -72,8 +72,7 @@ std::int64_t physicalRows(const std::filesystem::path &path, const CfgData &cfg)
         auto width = 8 + std::uint64_t(cfg.analog_count) * (cfg.data_type == DataType::BINARY ? 2 : 4) +
                      2 * ((std::uint64_t(cfg.digital_count) + 15) / 16);
         auto size = std::filesystem::file_size(path);
-        detail::require(size % width == 0, "Partial binary DAT row");
-        return size / width;
+        return size / width + (size % width != 0);
     }
     std::ifstream file(path, std::ios::binary);
     detail::require(bool(file), "Cannot open DAT");
@@ -102,7 +101,12 @@ inline Json summarize(const std::filesystem::path &cfgPath, const std::filesyste
     detail::require(cfg.analog_count >= 0 && cfg.digital_count >= 0 &&
                         std::int64_t(cfg.analog_count) + cfg.digital_count <= config.maxChannels,
                     "Channel limit exceeded");
-    auto rows = physicalRows(datPath, cfg);
+    // CFF DAT is read in place. Count rows with the same bounded stream, without buffering payload.
+    int64_t rows;
+    if (reader.isCff()) {
+        reader.processCffStream([](const SampleRow&) {});
+        rows = static_cast<int64_t>(reader.getPhysicalRowCount());
+    } else rows = physicalRows(datPath, cfg);
     if (config.fullWaveform)
         detail::require(rows <= config.maxWaveformSamples, "Full waveform sample limit exceeded");
     std::vector<Statistics> all(cfg.analog_count), before(cfg.analog_count), after(cfg.analog_count);
@@ -114,7 +118,7 @@ inline Json summarize(const std::filesystem::path &cfgPath, const std::filesyste
     std::int64_t firstTime = 0, lastTime = 0, width = std::int64_t(config.windowMs) * 1000000;
     uint32_t lastIndex = 0;
     const auto trigger = (cfg.trigger_time - cfg.start_time).count();
-    reader.processDatStream(datPath.u8string(), [&](const SampleRow &row) {
+    auto consume = [&](const SampleRow &row) {
         auto time = row.time_offset.count();
         if (!samples) {
             firstTime = time;
@@ -183,7 +187,12 @@ inline Json summarize(const std::filesystem::path &cfgPath, const std::filesyste
         lastTime = time;
         lastIndex = row.index;
         ++samples;
-    });
+    };
+    if (reader.isCff()) reader.processCffStream(consume);
+    else reader.processDatStream(datPath.u8string(), consume);
+    if (config.fullWaveform) for (const auto& w : reader.getWarnings())
+        detail::require(w.code != "dat.partial_row" && w.code != "cff.byte_count" && w.code != "dat.bad_row",
+                        "Incomplete full waveform");
     detail::require(samples > 0, "No valid DAT samples");
     std::int64_t expected = cfg.sample_rates.empty() ? 0 : cfg.sample_rates.back().end_sample;
     if (config.fullWaveform)
@@ -225,7 +234,13 @@ inline Json summarize(const std::filesystem::path &cfgPath, const std::filesyste
         "Trigger is not necessarily fault inception. Channel skew is not compensated.",
         "No phasor, frequency, harmonic, protection-setting or fault-distance calculation. Review original "
         "waveforms.",
-        "DAT timestamps use TIMEMULT; zero timestamps are not reconstructed from sample rates."};
+        "DAT timestamps use TIMEMULT; unavailable timestamps may be reconstructed from sample rates."
+};
+    Json parserWarnings = Json::array();
+    for (const auto& w : reader.getWarnings()) {
+        parserWarnings.push_back(Json{{"code", w.code}, {"message", w.message}, {"firstRow", w.first_row}, {"count", w.count}});
+        warnings.push_back(w.code + ": " + w.message);
+    }
     if (samples != rows || (expected && samples != expected))
         warnings.push_back("DAT/CFG count mismatch or skipped malformed rows.");
     if (badTimes || badIndices)
@@ -236,7 +251,7 @@ inline Json summarize(const std::filesystem::path &cfgPath, const std::filesyste
         warnings.push_back("Digital event list truncated; transition totals are complete.");
     if (trigger < firstTime || trigger > lastTime)
         warnings.push_back("Trigger lies outside sampled time range.");
-    Json result{{"schemaVersion", 2},
+    Json result{{"schemaVersion", 3},
                 {"samples", samples},
                 {"physicalRows", rows},
                 {"cfgExpectedSamples", expected},
@@ -247,6 +262,8 @@ inline Json summarize(const std::filesystem::path &cfgPath, const std::filesyste
                 {"nominalFrequencyHz", cfg.line_frequency},
                 {"startTimeNs", std::to_string(cfg.start_time.time_since_epoch().count())},
                 {"triggerOffsetNs", std::to_string(trigger)},
+                {"utcOffsetKnown", cfg.utc_offset_known},
+                {"parserWarnings", parserWarnings},
                 {"timeCode", cfg.time_code},
                 {"localCode", cfg.local_code},
                 {"timeQuality", cfg.time_quality_code},
@@ -273,6 +290,12 @@ inline Json summarize(const std::filesystem::path &cfgPath, const std::filesyste
         result["waveform"] = Json{{"columns", columns}, {"rows", waveform}};
     detail::require(sha256(cfgPath) == cfgHash && sha256(datPath) == datHash, "Input changed during analysis");
     return result;
+}
+
+inline Json summarizeCff(const std::filesystem::path& path, const Config& config) {
+    StreamReader reader(path.u8string());
+    detail::require(reader.isCff(), "Expected a CFF input");
+    return summarize(path, path, config);
 }
 
 } // namespace comtrade::ai

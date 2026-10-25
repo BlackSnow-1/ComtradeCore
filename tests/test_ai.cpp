@@ -206,13 +206,16 @@ TEST_F(Fixture, FullLimitsAndMalformedRows) {
     EXPECT_THROW(summarize(cfg, dat, c), std::runtime_error);
     EXPECT_THROW(summarize(cfg, dir / "missing.dat", Config{}), std::runtime_error);
 }
-TEST_F(Fixture, PartialBinaryRejected) {
+TEST_F(Fixture, PartialBinaryWarnsInSummaryAndRejectsFullWaveform) {
     make(comtrade::DataType::BINARY);
     {
         std::ofstream f(dat, std::ios::app | std::ios::binary);
         f << 'x';
     }
-    EXPECT_THROW(summarize(cfg, dat, Config{}), std::runtime_error);
+    auto evidence = summarize(cfg, dat, Config{});
+    EXPECT_FALSE(evidence["parserWarnings"].empty());
+    Config full; full.fullWaveform = true;
+    EXPECT_THROW(summarize(cfg, dat, full), std::runtime_error);
 }
 TEST_F(Fixture, QualityWarningsAndNonFinite) {
     make();
@@ -222,7 +225,8 @@ TEST_F(Fixture, QualityWarningsAndNonFinite) {
     }
     auto e = summarize(cfg, dat, Config{});
     EXPECT_EQ(e["nonFiniteValues"], 1);
-    EXPECT_EQ(e["nonIncreasingTimes"], 2);
+    EXPECT_EQ(e["nonIncreasingTimes"], 1);
+    EXPECT_FALSE(e["parserWarnings"].empty());
     EXPECT_EQ(e["indexDiscontinuities"], 1);
     Config c;
     c.fullWaveform = true;
@@ -441,4 +445,17 @@ TEST(Http, EnvironmentTokenOverridesFallback) {
     EXPECT_EQ(analyze(Json::object(), mock.config), "ok");
     EXPECT_EQ(received, "Bearer fallback");
     set(existed ? saved.c_str() : nullptr);
+}
+
+TEST_F(Fixture, CffEvidenceCarriesParserWarningsAndMissingValueCounts) {
+    make();
+    comtrade::Record record;
+    ASSERT_TRUE(record.parseCfg(cfg.string())); ASSERT_TRUE(record.parseDat(dat.string()));
+    record.getMutableData().analog_values[0][1] = std::numeric_limits<double>::quiet_NaN();
+    const auto cff = dir / "waveform.cff";
+    ASSERT_TRUE(record.saveCff(cff.string()));
+    auto e = summarizeCff(cff, Config{});
+    EXPECT_EQ(e["schemaVersion"], 3); EXPECT_EQ(e["samples"], 4);
+    EXPECT_EQ(e["analog"][0]["count"], 3); EXPECT_EQ(e["nonFiniteValues"], 1);
+    EXPECT_FALSE(e["parserWarnings"].empty()); EXPECT_TRUE(e["utcOffsetKnown"].get<bool>());
 }

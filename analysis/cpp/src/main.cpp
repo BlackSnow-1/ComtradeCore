@@ -2,9 +2,9 @@
 #include <fstream>
 #include <iostream>
 int main(int argc, char **argv) {
-    if (argc != 6 || (std::string(argv[1]) != "summarize" && std::string(argv[1]) != "analyze")) {
+    if ((argc != 5 && argc != 6) || (std::string(argv[1]) != "summarize" && std::string(argv[1]) != "analyze")) {
         std::cerr << "Usage: comtrade-ai summarize|analyze config.json input.cfg input.dat "
-                     "output.json|output.pdf\n";
+                     "output.json|output.pdf\n       comtrade-ai summarize|analyze config.json input.cff output.json|output.pdf\n";
         return 2;
     }
     try {
@@ -18,11 +18,14 @@ int main(int argc, char **argv) {
             throw std::runtime_error("Invalid configuration JSON");
         }
         auto config = comtrade::ai::Config::fromJson(json);
-        auto output = std::filesystem::u8path(argv[5]);
+        auto output = std::filesystem::u8path(argv[argc-1]);
         if (std::filesystem::exists(output))
             throw std::runtime_error("Output already exists");
-        auto evidence = comtrade::ai::summarize(std::filesystem::u8path(argv[3]),
-                                                std::filesystem::u8path(argv[4]), config);
+        auto evidence = argc == 5 ? comtrade::ai::summarizeCff(std::filesystem::u8path(argv[3]), config)
+                                 : comtrade::ai::summarize(std::filesystem::u8path(argv[3]), std::filesystem::u8path(argv[4]), config);
+        for (const auto& warning : evidence["parserWarnings"])
+            std::cerr << "Warning: " << warning["code"].get<std::string>() << ": "
+                      << warning["message"].get<std::string>() << " (" << warning["count"] << ")\n";
         if (std::string(argv[1]) == "analyze") {
             auto text = comtrade::ai::analyze(evidence, config);
             comtrade::ai::exportPdf(output, evidence, text, config);
