@@ -14,6 +14,19 @@
 #include <stdexcept>
 
 namespace comtrade {
+    // Aggregated by code: repeated bad rows do not grow memory without bound.
+    struct Warning {
+        std::string code, message;
+        uint64_t first_row = 0, count = 1;
+    };
+    using Warnings = std::vector<Warning>;
+    inline void addWarning(Warnings& warnings, const std::string& code,
+                           const std::string& message, uint64_t row = 0) {
+        for (auto& warning : warnings) if (warning.code == code) { ++warning.count; return; }
+        warnings.push_back({code, message, row, 1});
+    }
+    enum class TimeAxisMode { Automatic, DatTimestamps, SampleRates };
+    struct ReadOptions { TimeAxisMode time_axis = TimeAxisMode::Automatic; };
     // CFG 的开始/触发时刻保留纳秒精度；DAT 中的时间戳则是相对开始时刻的偏移。
     using TimePoint = std::chrono::time_point<std::chrono::system_clock, std::chrono::nanoseconds>;
 
@@ -148,11 +161,16 @@ namespace comtrade {
         // 使用 chrono::time_point 替代原来的 std::string
         TimePoint start_time{};
         TimePoint trigger_time{};
+        // Epoch conversion is known only when the file supplies an understood time code.
+        bool utc_offset_known = false;
+        int utc_offset_minutes = 0;
+        Warnings warnings;
     };
 
     // 波形按“通道优先”存储，便于对整条通道进行批量计算。
     struct RecordData {
-        std::vector<uint32_t> timestamp;
+        std::vector<uint64_t> timestamp;
+        std::vector<int64_t> time_offset_ns;
         std::vector<std::vector<double> > analog_values; // [channel][sample_index]
         std::vector<std::vector<bool> > digital_values; // [channel][sample_index]
     };

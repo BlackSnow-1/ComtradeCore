@@ -63,9 +63,13 @@ inline bool parseCfgLines(const std::vector<std::string>& lines, CfgData& cfg) {
     parsed_cfg.analog_count = parseChannelCount(counts[1], 'A');
     parsed_cfg.digital_count = parseChannelCount(counts[2], 'D');
     if (parsed_cfg.analog_count < 0 || parsed_cfg.digital_count < 0 ||
-        parsed_cfg.total_channels != parsed_cfg.analog_count + parsed_cfg.digital_count) {
-        return false;
+        static_cast<uint64_t>(parsed_cfg.analog_count) + parsed_cfg.digital_count > lines.size()) return false;
+    if (parsed_cfg.total_channels != parsed_cfg.analog_count + parsed_cfg.digital_count) {
+        addWarning(parsed_cfg.warnings, "cfg.channel_count", "Total channel count corrected from A/D counts", 2);
+        parsed_cfg.total_channels = parsed_cfg.analog_count + parsed_cfg.digital_count;
     }
+    if (identity.size() > 2 && identity[2] != "1991" && identity[2] != "1999" && identity[2] != "2013")
+        addWarning(parsed_cfg.warnings, "cfg.version", "Unknown revision interpreted using legacy layout", 1);
 
     // CFG 的后续字段依赖前面声明的通道数，因此使用游标严格顺序消费各行。
     std::size_t cursor = 2;
@@ -83,11 +87,11 @@ inline bool parseCfgLines(const std::vector<std::string>& lines, CfgData& cfg) {
         if (tokens.size() > 4) channel.uu = tokens[4];
         channel.a = std::stod(tokens[5]);
         channel.b = std::stod(tokens[6]);
-        if (tokens.size() > 7) channel.skew = std::stod(tokens[7]);
-        if (tokens.size() > 8) channel.min = std::stoi(tokens[8]);
-        if (tokens.size() > 9) channel.max = std::stoi(tokens[9]);
-        if (tokens.size() > 10) channel.primary = std::stod(tokens[10]);
-        if (tokens.size() > 11) channel.secondary = std::stod(tokens[11]);
+        if (tokens.size() > 7 && !tokens[7].empty()) channel.skew = std::stod(tokens[7]);
+        if (tokens.size() > 8 && !tokens[8].empty()) channel.min = std::stoi(tokens[8]);
+        if (tokens.size() > 9 && !tokens[9].empty()) channel.max = std::stoi(tokens[9]);
+        if (tokens.size() > 10 && !tokens[10].empty()) channel.primary = std::stod(tokens[10]);
+        if (tokens.size() > 11 && !tokens[11].empty()) channel.secondary = std::stod(tokens[11]);
         if (tokens.size() > 12) channel.ps = tokens[12];
         parsed_cfg.analog_channels.push_back(std::move(channel));
     }
@@ -137,8 +141,7 @@ inline bool parseCfgLines(const std::vector<std::string>& lines, CfgData& cfg) {
 
     const auto& start_time_text = lines[cursor++];
     const auto& trigger_time_text = lines[cursor++];
-    parsed_cfg.start_time = utils::parseTime(start_time_text);
-    parsed_cfg.trigger_time = utils::parseTime(trigger_time_text);
+
     parsed_cfg.timestamp_fractional_digits = std::max(
         utils::fractionalSecondDigits(start_time_text),
         utils::fractionalSecondDigits(trigger_time_text));
@@ -148,8 +151,16 @@ inline bool parseCfgLines(const std::vector<std::string>& lines, CfgData& cfg) {
     parsed_cfg.data_type = DataTypeUtils::FromString(data_type_tokens[0]);
 
     if (parsed_cfg.version != StandardVersion::V1991) {
-        if (cursor >= lines.size()) return false;
-        parsed_cfg.time_multiplier = std::stod(lines[cursor++]);
+        if (cursor >= lines.size())
+            addWarning(parsed_cfg.warnings, "cfg.timemult", "Missing TIMEMULT; using 1");
+        else {
+            const auto fields = utils::split(lines[cursor]);
+            if (fields.size() == 1) {
+                try { parsed_cfg.time_multiplier = std::stod(lines[cursor]); }
+                catch (...) { addWarning(parsed_cfg.warnings, "cfg.timemult", "Invalid TIMEMULT; using 1"); }
+                ++cursor;
+            } else addWarning(parsed_cfg.warnings, "cfg.timemult", "Missing TIMEMULT; using 1");
+        }
     } else if (cursor < lines.size()) {
         // A few pre-1999 vendor revisions (for example, "1997") already
         // include the later time-multiplier field. Preserve it when present.
@@ -167,24 +178,59 @@ inline bool parseCfgLines(const std::vector<std::string>& lines, CfgData& cfg) {
             }
         }
     }
-    if (!std::isfinite(parsed_cfg.time_multiplier) || parsed_cfg.time_multiplier <= 0.0) return false;
-
-    // 2013 版追加时间码、时区、质量码和闰秒状态；旧版本没有这两行。
-    if (parsed_cfg.version == StandardVersion::V2013) {
-        if (cursor + 2 > lines.size()) return false;
-
-        const auto time_codes = utils::split(lines[cursor++]);
-        const auto time_quality = utils::split(lines[cursor++]);
-        if (time_codes.size() < 2 || time_quality.size() < 2 || time_quality[0].empty()) return false;
-
-        parsed_cfg.time_code = time_codes[0];
-        parsed_cfg.local_code = time_codes[1];
-        parsed_cfg.time_quality_code = time_quality[0];
-        parsed_cfg.leap_second = std::stoi(time_quality[1]);
-        // IEEE/IEC C37.111-2013 defines four leap-second indicators:
-        // 0=no adjustment, 1=added, 2=subtracted, 3=source cannot handle it.
-        if (parsed_cfg.leap_second < 0 || parsed_cfg.leap_second > 3) return false;
+    if (!std::isfinite(parsed_cfg.time_multiplier) || parsed_cfg.time_multiplier <= 0.0) {
+        parsed_cfg.time_multiplier = 1;
+        addWarning(parsed_cfg.warnings, "cfg.timemult", "Invalid TIMEMULT; using 1");
     }
+
+    if (parsed_cfg.version == StandardVersion::V2013) {
+        parsed_cfg.time_code = "x"; parsed_cfg.local_code = "x";
+        if (cursor < lines.size()) {
+            const auto codes = utils::split(lines[cursor++]);
+            if (!codes.empty()) parsed_cfg.time_code = codes[0];
+            if (codes.size() > 1) parsed_cfg.local_code = codes[1];
+        } else addWarning(parsed_cfg.warnings, "cfg.time_metadata", "Missing 2013 time codes");
+        if (cursor < lines.size()) {
+            const auto quality = utils::split(lines[cursor++]);
+            if (!quality.empty()) parsed_cfg.time_quality_code = quality[0];
+            try { if (quality.size() > 1) parsed_cfg.leap_second = std::stoi(quality[1]); }
+            catch (...) { addWarning(parsed_cfg.warnings, "cfg.leap_second", "Invalid leap second indicator; using 0"); }
+        } else addWarning(parsed_cfg.warnings, "cfg.time_metadata", "Missing 2013 time quality");
+        if (parsed_cfg.leap_second < 0 || parsed_cfg.leap_second > 3) {
+            parsed_cfg.leap_second = 0;
+            addWarning(parsed_cfg.warnings, "cfg.leap_second", "Invalid leap second indicator; using 0");
+        }
+        parsed_cfg.utc_offset_known = utils::parseUtcOffset(parsed_cfg.time_code, parsed_cfg.utc_offset_minutes);
+        if (parsed_cfg.time_quality_code.size() != 1 ||
+            std::string("0123456789ABCDEFabcdef").find(parsed_cfg.time_quality_code) == std::string::npos)
+            addWarning(parsed_cfg.warnings, "cfg.time_quality", "Unrecognized time quality code");
+        if (parsed_cfg.time_quality_code == "F" || parsed_cfg.time_quality_code == "f")
+            addWarning(parsed_cfg.warnings, "cfg.clock", "Clock failure: absolute time is unreliable");
+        if (parsed_cfg.leap_second)
+            addWarning(parsed_cfg.warnings, "cfg.leap_second", "Leap second metadata present; no automatic correction applied");
+    }
+    if (!parsed_cfg.utc_offset_known)
+        addWarning(parsed_cfg.warnings, "cfg.timezone_unknown", "UTC offset unavailable; legacy machine-local interpretation retained");
+    // Dates cannot be fabricated: unlike optional metadata, an invalid date is fatal.
+    parsed_cfg.start_time = utils::parseTime(start_time_text, parsed_cfg.utc_offset_known, parsed_cfg.utc_offset_minutes);
+    parsed_cfg.trigger_time = utils::parseTime(trigger_time_text, parsed_cfg.utc_offset_known, parsed_cfg.utc_offset_minutes);
+    uint32_t previous_end = 0;
+    for (const auto& rate : parsed_cfg.sample_rates) {
+        if (rate.end_sample <= previous_end || rate.samples_per_second <= 0)
+            addWarning(parsed_cfg.warnings, "cfg.sample_rates", "Non-positive rate or non-increasing segment boundary; reconstruction may be unavailable");
+        previous_end = rate.end_sample;
+    }
+    for (size_t i = 0; i < parsed_cfg.analog_channels.size(); ++i) {
+        const auto& c = parsed_cfg.analog_channels[i];
+        if (c.index != static_cast<int>(i+1)) addWarning(parsed_cfg.warnings, "cfg.channel_index", "Nonsequential analog channel ID");
+        if (!std::isfinite(c.a) || !std::isfinite(c.b)) return false;
+        if (!c.a || c.min > c.max || c.secondary <= 0 || (c.ps != "P" && c.ps != "S"))
+            addWarning(parsed_cfg.warnings, "cfg.analog_metadata", "Suspicious analog scale/range/ratio metadata preserved");
+    }
+    for (const auto& c : parsed_cfg.digital_channels)
+        if (c.normal_state != 0 && c.normal_state != 1)
+            addWarning(parsed_cfg.warnings, "cfg.digital_state", "Nonboolean normal state preserved");
+    if (cursor < lines.size()) addWarning(parsed_cfg.warnings, "cfg.trailing", "Trailing CFG extension preserved only in source file");
 
     cfg = std::move(parsed_cfg);
     return true;

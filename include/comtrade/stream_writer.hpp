@@ -17,7 +17,9 @@ namespace comtrade {
     class StreamWriter {
     private:
         CfgData cfg_;
-        std::ofstream dat_file_;
+        std::ofstream owned_file_;
+        std::ostream* output_ = nullptr;
+        std::ostream& stream() { return *output_; }
         uint32_t current_row_index_ = 1;
 
         // 二进制模式专属：预分配的单行缓冲，pushRow 热路径不再申请内存。
@@ -34,7 +36,7 @@ namespace comtrade {
 
         bool open(const std::string &dat_filepath) {
             close();
-            dat_file_.clear();
+            owned_file_.clear();
             current_row_index_ = 1;
 
             // Use binary mode for every DAT type so ASCII line endings are
@@ -51,16 +53,29 @@ namespace comtrade {
                 row_buffer_.clear();
             }
 
-            dat_file_.open(dat_filepath, mode);
-            return dat_file_.is_open();
+            owned_file_.open(dat_filepath, mode);
+            output_ = &owned_file_;
+            return owned_file_.is_open();
         }
 
-        void pushRow(uint32_t timestamp_us,
+        void open(std::ostream& output) {
+            close(); output_ = &output; current_row_index_ = 1;
+            digital_word_count_ = detail::digitalWordCount(cfg_.digital_channels.size());
+            if (detail::isBinaryDataType(cfg_.data_type)) row_buffer_.resize(detail::binaryRowSize(
+                cfg_.data_type, cfg_.analog_channels.size(), cfg_.digital_channels.size()));
+        }
+        void pushRow(uint64_t timestamp_us,
                      const std::vector<double> &analog_values,
                      const std::vector<bool> &digital_values) {
+            if (timestamp_us > static_cast<uint64_t>(std::numeric_limits<int64_t>::max() / 1000))
+                throw std::overflow_error("Timestamp exceeds nanosecond range");
+            pushRowNanoseconds(static_cast<int64_t>(timestamp_us * 1000), analog_values, digital_values);
+        }
+        void pushRowNanoseconds(int64_t timestamp_ns,
+                     const std::vector<double>& analog_values, const std::vector<bool>& digital_values) {
             // 输入时间是相对开始时刻的微秒偏移，DAT 第二列按 TIMEMULT 反算为原始整数。
             // analog_values/digital_values 的数量必须与 CFG 声明一致。
-            if (!dat_file_.is_open()) throw std::runtime_error("DAT stream not open.");
+            if (!output_ || !*output_) throw std::runtime_error("DAT stream not open.");
             if (!std::isfinite(cfg_.time_multiplier) || cfg_.time_multiplier <= 0.0) {
                 throw std::invalid_argument("COMTRADE time multiplier must be positive and finite.");
             }
@@ -69,38 +84,47 @@ namespace comtrade {
                 throw std::invalid_argument("Sample value counts must match the declared COMTRADE channels.");
             }
 
-            const auto raw_timestamp = std::llround(timestamp_us / cfg_.time_multiplier);
-            if (raw_timestamp < 0 || raw_timestamp > std::numeric_limits<uint32_t>::max()) {
+            const long double raw = static_cast<long double>(timestamp_ns) / (cfg_.time_multiplier * 1000.0L);
+            const auto limit = cfg_.data_type == DataType::ASCII ? static_cast<long double>(std::numeric_limits<int64_t>::max())
+                                                                : static_cast<long double>(std::numeric_limits<uint32_t>::max());
+            if (!std::isfinite(raw) || raw < 0 || std::round(raw) > limit) {
                 throw std::overflow_error("COMTRADE raw timestamp exceeds uint32 range.");
             }
 
+            const auto raw_timestamp = static_cast<uint64_t>(std::round(raw));
             if (cfg_.data_type == DataType::ASCII) {
-                writeAsciiRow(static_cast<uint32_t>(raw_timestamp), analog_values, digital_values);
+                writeAsciiRow(raw_timestamp, analog_values, digital_values);
             } else {
                 writeBinaryRow(static_cast<uint32_t>(raw_timestamp), analog_values, digital_values);
             }
 
+            if (!stream()) throw std::runtime_error("DAT write failed");
             current_row_index_++;
         }
 
         void close() {
-            if (dat_file_.is_open()) {
-                dat_file_.flush();
-                dat_file_.close();
-            }
+            if (owned_file_.is_open()) { owned_file_.flush(); owned_file_.close(); }
+            output_ = nullptr;
         }
 
     private:
-        void writeAsciiRow(uint32_t ts_us, const std::vector<double> &a_vals, const std::vector<bool> &d_vals) {
-            dat_file_ << current_row_index_ << "," << ts_us;
+        void writeAsciiRow(uint64_t ts_us, const std::vector<double> &a_vals, const std::vector<bool> &d_vals) {
+            stream() << current_row_index_ << "," << ts_us;
             for (size_t i = 0; i < cfg_.analog_channels.size(); ++i) {
                 const auto &ch = cfg_.analog_channels[i];
                 // 工程值写回原始整数：raw = round((value - b) / a)。
-                const auto raw_val = checkedIntegralAnalog<std::int32_t>(a_vals[i], ch);
-                dat_file_ << "," << raw_val;
+                stream() << ",";
+                if (std::isnan(a_vals[i])) {
+                    if (cfg_.version != StandardVersion::V1991) stream() << "99999";
+                } else {
+                    const auto raw = checkedIntegralAnalog<std::int32_t>(a_vals[i], ch);
+                    if (cfg_.version != StandardVersion::V1991 && raw == 99999)
+                        throw std::invalid_argument("Analog value collides with missing-data marker");
+                    stream() << raw;
+                }
             }
-            for (const bool val: d_vals) dat_file_ << "," << (val ? 1 : 0);
-            dat_file_ << "\r\n";
+            for (const bool val: d_vals) stream() << "," << (val ? 1 : 0);
+            stream() << "\r\n";
         }
 
         // 核心性能点：单行二进制直接打包与落盘
@@ -116,11 +140,11 @@ namespace comtrade {
                 const auto &ch = cfg_.analog_channels[i];
 
                 if (cfg_.data_type == DataType::BINARY) {
-                    detail::writeInt16LittleEndian(ptr, checkedIntegralAnalog<std::int16_t>(a_vals[i], ch));
+                    detail::writeInt16LittleEndian(ptr, encodedInt16(a_vals[i], ch));
                 } else if (cfg_.data_type == DataType::BINARY32) {
-                    detail::writeInt32LittleEndian(ptr, checkedIntegralAnalog<std::int32_t>(a_vals[i], ch));
+                    detail::writeInt32LittleEndian(ptr, encodedInt32(a_vals[i], ch));
                 } else {
-                    detail::writeFloat32LittleEndian(ptr, checkedFloatAnalog(a_vals[i], ch));
+                    detail::writeFloat32LittleEndian(ptr, encodedFloat(a_vals[i], ch));
                 }
             }
 
@@ -138,9 +162,28 @@ namespace comtrade {
             }
 
             // 4. 单次 IO 刷入流中
-            dat_file_.write(row_buffer_.data(), static_cast<std::streamsize>(row_buffer_.size()));
+            stream().write(row_buffer_.data(), static_cast<std::streamsize>(row_buffer_.size()));
         }
 
+        int16_t encodedInt16(double value, const AnalogChannel& c) const {
+            const int16_t missing = cfg_.version == StandardVersion::V1991 ? -1 : -32768;
+            if (std::isnan(value)) return missing;
+            const auto raw = checkedIntegralAnalog<int16_t>(value, c);
+            if (raw == missing) throw std::invalid_argument("Analog value collides with missing-data marker");
+            return raw;
+        }
+        static int32_t encodedInt32(double value, const AnalogChannel& c) {
+            if (std::isnan(value)) return std::numeric_limits<int32_t>::lowest();
+            const auto raw = checkedIntegralAnalog<int32_t>(value, c);
+            if (raw == std::numeric_limits<int32_t>::lowest()) throw std::invalid_argument("Analog value collides with missing-data marker");
+            return raw;
+        }
+        static float encodedFloat(double value, const AnalogChannel& c) {
+            if (std::isnan(value)) return -std::numeric_limits<float>::max();
+            const auto raw = checkedFloatAnalog(value, c);
+            if (raw == -std::numeric_limits<float>::max()) throw std::invalid_argument("Analog value collides with missing-data marker");
+            return raw;
+        }
         static double rawAnalogValue(const double engineering_value, const AnalogChannel &channel) {
             if (!std::isfinite(engineering_value) || !std::isfinite(channel.a) || channel.a == 0.0 ||
                 !std::isfinite(channel.b)) {

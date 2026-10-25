@@ -10,6 +10,8 @@
 #include <string>
 #include <vector>
 #include <sstream>
+#include <regex>
+#include <ctime>
 
 #include "types.hpp"
 
@@ -26,6 +28,7 @@ namespace comtrade::utils {
             token.erase(token.find_last_not_of(" \r\n") + 1);
             tokens.push_back(token);
         }
+        if (!s.empty() && s.back() == delimiter) tokens.emplace_back();
         return tokens;
     }
 
@@ -40,19 +43,20 @@ namespace comtrade::utils {
      * @brief 将纳秒级 TimePoint 格式化为 COMTRADE 时间字符串
      * @return 格式为: dd/mm/yyyy,hh:mm:ss.sssssssss
      */
-    inline std::string formatTime(const TimePoint &tp, uint8_t fractional_digits = 9) {
+    inline std::string formatTime(const TimePoint &tp, uint8_t fractional_digits = 9, bool utc = false, int offset_minutes = 0) {
         // 先拆分整秒和纳秒余数，避免浮点格式化造成精度损失。
-        auto secs = std::chrono::time_point_cast<std::chrono::seconds>(tp);
-        auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(tp - secs).count();
+        const auto display = tp + std::chrono::minutes(utc ? offset_minutes : 0);
+        auto secs = std::chrono::time_point_cast<std::chrono::seconds>(display);
+        auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(display - secs).count();
 
         std::time_t t = std::chrono::system_clock::to_time_t(secs);
         std::tm tm_buf;
 
         // CFG 日期字段使用运行机器的本地时区；2013 的时区代码由 CfgData 单独保存。
 #if defined(_WIN32)
-        localtime_s(&tm_buf, &t);
+        if (utc) gmtime_s(&tm_buf, &t); else localtime_s(&tm_buf, &t);
 #else
-        localtime_r(&t, &tm_buf);
+        if (utc) gmtime_r(&t, &tm_buf); else localtime_r(&t, &tm_buf);
 #endif
 
         char buf[32];
@@ -89,55 +93,49 @@ namespace comtrade::utils {
     /**
      * @brief 解析 COMTRADE 时间字符串为纳秒级 TimePoint (纯流提取安全版)
      */
-    inline TimePoint parseTime(const std::string& time_str) {
-        std::tm tm_buf = {};
-        int ns = 0;
-
-        std::istringstream ss(time_str);
-
-        int d = 0, m = 0, y = 0, h = 0, min = 0, s = 0;
-        char sep1, sep2, sep3, sep4, sep5;
-
-        // 1. 依次提取数字和分隔符：日 / 月 / 年 , 时 : 分 : 秒
-        if (ss >> d >> sep1 >> m >> sep2 >> y >> sep3 >> h >> sep4 >> min >> sep5 >> s) {
-            // 验证提取到的分隔符是否严格符合 COMTRADE 规范
-            if (sep1 == '/' && sep2 == '/' && sep3 == ',' && sep4 == ':' && sep5 == ':') {
-                tm_buf.tm_mday = d;
-                tm_buf.tm_mon = m - 1;      // tm_mon 范围是 0-11
-                tm_buf.tm_year = y - 1900;  // tm_year 是自 1900 年起的年数
-                tm_buf.tm_hour = h;
-                tm_buf.tm_min = min;
-                tm_buf.tm_sec = s;
-            }
+    // Accept the standard signed hours / HhMM and common vendor HHMM / HH:MM forms.
+    inline bool parseUtcOffset(const std::string& text, int& minutes) {
+        if (text == "UTC" || text == "utc" || text == "Z") { minutes = 0; return true; }
+        std::smatch match;
+        static const std::regex pattern(R"(^([+-]?)([0-9]{1,2})(?:[hH:]([0-9]{2}))?$)");
+        int hours = 0, mins = 0, sign = 1;
+        if (std::regex_match(text, match, pattern)) {
+            sign = match[1] == "-" ? -1 : 1;
+            hours = std::stoi(match[2]);
+            if (match[3].matched) mins = std::stoi(match[3]);
+        } else {
+            static const std::regex compact(R"(^([+-])([0-9]{2})([0-9]{2})$)");
+            if (!std::regex_match(text, match, compact)) return false;
+            sign = match[1] == "-" ? -1 : 1;
+            hours = std::stoi(match[2]); mins = std::stoi(match[3]);
         }
+        if (hours > 23 || mins > 59) return false;
+        minutes = sign * (hours * 60 + mins); return true;
+    }
 
-        // 2. 尝试解析小数部分（纳秒）
-        char dot;
-        if (ss >> dot && dot == '.') {
-            std::string frac_str;
-            ss >> frac_str;
-
-            // 确保只保留数字部分
-            frac_str.erase(std::remove_if(frac_str.begin(), frac_str.end(),
-                           [](unsigned char c) { return !std::isdigit(c); }),
-                           frac_str.end());
-
-            if (!frac_str.empty()) {
-                // 截断或补齐至 9 位以对齐纳秒 (例如: "15" -> "150000000")
-                if (frac_str.length() > 9) frac_str = frac_str.substr(0, 9);
-                while (frac_str.length() < 9) frac_str += '0';
-
-                try {
-                    ns = std::stoi(frac_str);
-                } catch (const std::exception&) {
-                    ns = 0; // 转换溢出或失败时的安全后备
-                }
-            }
-        }
-
-        // mktime 与 formatTime 同样按本地时区工作，确保读写往返采用一致规则。
-        const std::time_t t = std::mktime(&tm_buf);
-        const auto tp = std::chrono::system_clock::from_time_t(t);
-        return std::chrono::time_point_cast<std::chrono::nanoseconds>(tp) + std::chrono::nanoseconds(ns);
+    inline TimePoint parseTime(const std::string& text, bool utc = false, int offset_minutes = 0) {
+        std::smatch m;
+        static const std::regex pattern(
+            R"(^([0-9]{1,2})/([0-9]{1,2})/([0-9]{4}),([0-9]{1,2}):([0-9]{2}):([0-9]{2})(?:\.([0-9]{1,9}))?\s*$)");
+        if (!std::regex_match(text, m, pattern)) throw std::invalid_argument("Invalid CFG date/time");
+        const int day = std::stoi(m[1]), month = std::stoi(m[2]), year = std::stoi(m[3]);
+        const int hour = std::stoi(m[4]), minute = std::stoi(m[5]), second = std::stoi(m[6]);
+        static constexpr int days[] = {31,28,31,30,31,30,31,31,30,31,30,31};
+        const bool leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+        if (year < 1678 || year > 2261 || month < 1 || month > 12 || day < 1 ||
+            day > days[month-1] + (month == 2 && leap) || hour > 23 || minute > 59 || second > 59)
+            throw std::invalid_argument("CFG date/time out of range");
+        std::tm tm{}; tm.tm_year = year-1900; tm.tm_mon = month-1; tm.tm_mday = day;
+        tm.tm_hour = hour; tm.tm_min = minute; tm.tm_sec = second; tm.tm_isdst = -1;
+        std::time_t seconds;
+#if defined(_WIN32)
+        seconds = utc ? _mkgmtime(&tm) : std::mktime(&tm);
+#else
+        seconds = utc ? timegm(&tm) : std::mktime(&tm);
+#endif
+        std::string fraction = m[7].matched ? m[7].str() : "";
+        fraction.append(9 - fraction.size(), '0');
+        return std::chrono::time_point_cast<std::chrono::nanoseconds>(std::chrono::system_clock::from_time_t(seconds))
+             + std::chrono::nanoseconds(std::stoll(fraction)) - std::chrono::minutes(utc ? offset_minutes : 0);
     }
 }

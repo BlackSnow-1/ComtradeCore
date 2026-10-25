@@ -10,6 +10,8 @@
 #include "cfg_io.hpp"
 #include "binary_io.hpp"
 #include "stream_writer.hpp"
+#include "stream_reader.hpp"
+#include <sstream>
 #include "text_encoding.hpp"
 #include <fstream>
 #include <cmath>
@@ -42,34 +44,57 @@ namespace comtrade {
             CfgData parsed_cfg;
             if (!detail::parseCfgFile(cfg_filepath, parsed_cfg)) return false;
             cfg_ = std::move(parsed_cfg);
+            warnings_ = cfg_.warnings;
             return true;
         }
 
         inline bool parseDat(const std::string &dat_filepath) {
-            // DAT 的列结构取决于已加载的 CFG，因此调用方应先成功执行 parseCfg。
-            if (!std::isfinite(cfg_.time_multiplier) || cfg_.time_multiplier <= 0.0 ||
-                cfg_.analog_count < 0 || cfg_.digital_count < 0 ||
-                cfg_.analog_channels.size() != static_cast<std::size_t>(cfg_.analog_count) ||
-                cfg_.digital_channels.size() != static_cast<std::size_t>(cfg_.digital_count)) {
-                return false;
-            }
-
-            std::ifstream file(dat_filepath, std::ios::binary);
-            if (!file.is_open()) return false;
-
-            data_ = RecordData{}; // 清空旧数据
-            data_.analog_values.resize(cfg_.analog_count);
-            data_.digital_values.resize(cfg_.digital_count);
-
-            if (cfg_.data_type == DataType::ASCII) return parseAsciiDat(file);
-            if (detail::isBinaryDataType(cfg_.data_type)) return parseBinaryDat(file);
-            return false;
+            StreamReader reader(cfg_, options_);
+            std::ifstream input(dat_filepath, std::ios::binary);
+            if (!input) return false;
+            return readSamples(reader, [&](const auto& callback) { return reader.processStream(input, callback); });
+        }
+        const Warnings& getWarnings() const noexcept { return warnings_; }
+        void setReadOptions(ReadOptions options) { options_ = options; }
+        const std::string& getHeader() const noexcept { return header_; }
+        const std::string& getInformation() const noexcept { return information_; }
+        void setHeader(std::string text) { header_ = std::move(text); }
+        void setInformation(std::string text) { information_ = std::move(text); }
+        bool loadCff(const std::string& path) {
+            try {
+                StreamReader reader(path, options_);
+                if (!reader.isCff()) return false;
+                Record loaded; loaded.cfg_ = reader.getCfg(); loaded.options_ = options_;
+                loaded.header_ = reader.getHeader(); loaded.information_ = reader.getInformation();
+                if (!loaded.readSamples(reader, [&](const auto& callback) { return reader.processCffStream(callback); })) return false;
+                *this = std::move(loaded); return true;
+            } catch (const std::exception&) { return false; }
+        }
+        bool saveCff(const std::string& path) const {
+            if (cfg_.version != StandardVersion::V2013) return false;
+            std::ostringstream cfg, dat(std::ios::out | std::ios::binary);
+            if (!writeCfg(cfg) || !writeDat(dat)) return false;
+            std::ofstream out(path, std::ios::binary);
+            if (!out) return false;
+            out << "--- file type: CFG ---\r\n" << cfg.str();
+            out << "--- file type: INF ---\r\n" << information_;
+            if (!information_.empty() && information_.back() != '\n') out << "\r\n";
+            out << "--- file type: HDR ---\r\n" << header_;
+            if (!header_.empty() && header_.back() != '\n') out << "\r\n";
+            out << "--- file type: DAT " << (cfg_.data_type == DataType::ASCII ? "ASCII" : "BINARY");
+            if (cfg_.data_type != DataType::ASCII) out << ":" << dat.str().size();
+            out << " ---\r\n" << dat.str(); out.flush(); return bool(out);
         }
 
         // ==========================================
         // 3. 落盘方法 (Write/Save)
         // ==========================================
         [[nodiscard]] inline bool saveCfg(const std::string &filepath) const {
+            std::ofstream out(filepath, std::ios::binary);
+            if (!out) return false;
+            const bool ok = writeCfg(out); out.flush(); return ok && bool(out);
+        }
+        bool writeCfg(std::ostream& out) const {
             if (!std::isfinite(cfg_.time_multiplier) || cfg_.time_multiplier <= 0.0 ||
                 cfg_.timestamp_fractional_digits > 9) {
                 return false;
@@ -80,8 +105,6 @@ namespace comtrade {
                 return false;
             }
 
-            std::ofstream out(filepath, std::ios::binary);
-            if (!out.is_open()) return false;
             out << std::setprecision(15);
 
             out << cfg_.station_name << "," << cfg_.rec_dev_id << "," << static_cast<int>(cfg_.version) << "\r\n";
@@ -113,8 +136,8 @@ namespace comtrade {
             for (const auto& sample_rate : sample_rates) {
                 out << sample_rate.samples_per_second << "," << sample_rate.end_sample << "\r\n";
             }
-            out << utils::formatTime(cfg_.start_time, cfg_.timestamp_fractional_digits) << "\r\n";
-            out << utils::formatTime(cfg_.trigger_time, cfg_.timestamp_fractional_digits) << "\r\n";
+            out << utils::formatTime(cfg_.start_time, cfg_.timestamp_fractional_digits, cfg_.utc_offset_known, cfg_.utc_offset_minutes) << "\r\n";
+            out << utils::formatTime(cfg_.trigger_time, cfg_.timestamp_fractional_digits, cfg_.utc_offset_known, cfg_.utc_offset_minutes) << "\r\n";
             out << DataTypeUtils::ToString(cfg_.data_type) << "\r\n";
 
             if (cfg_.version != StandardVersion::V1991) {
@@ -129,6 +152,11 @@ namespace comtrade {
         }
 
         [[nodiscard]] inline bool saveDat(const std::string &filepath) const {
+            std::ofstream out(filepath, std::ios::binary);
+            if (!out) return false;
+            const bool ok = writeDat(out); out.flush(); return ok && bool(out);
+        }
+        bool writeDat(std::ostream& output) const {
             if (!std::isfinite(cfg_.time_multiplier) || cfg_.time_multiplier <= 0.0) return false;
 
             const auto num_samples = data_.timestamp.size();
@@ -147,7 +175,7 @@ namespace comtrade {
 
             try {
                 StreamWriter writer(cfg_);
-                if (!writer.open(filepath)) return false;
+                writer.open(output);
 
                 std::vector<double> analog_row(cfg_.analog_channels.size());
                 std::vector<bool> digital_row(cfg_.digital_channels.size());
@@ -158,7 +186,10 @@ namespace comtrade {
                     for (std::size_t channel = 0; channel < digital_row.size(); ++channel) {
                         digital_row[channel] = data_.digital_values[channel][sample];
                     }
-                    writer.pushRow(data_.timestamp[sample], analog_row, digital_row);
+                    if (data_.time_offset_ns.size() == num_samples &&
+                        static_cast<uint64_t>(data_.time_offset_ns[sample] / 1000) == data_.timestamp[sample])
+                        writer.pushRowNanoseconds(data_.time_offset_ns[sample], analog_row, digital_row);
+                    else writer.pushRow(data_.timestamp[sample], analog_row, digital_row);
                 }
                 writer.close();
             } catch (const std::exception&) {
@@ -189,7 +220,7 @@ namespace comtrade {
             cfg_.total_channels++;
         }
 
-        inline void addSample(const uint32_t timestamp_us,
+        inline void addSample(const uint64_t timestamp_us,
                               const std::vector<double> &analog_reals,
                               const std::vector<bool> &digital_vals) {
             // timestamp_us 是相对 cfg_.start_time 的偏移，不是 Unix epoch 时间。
@@ -227,110 +258,29 @@ namespace comtrade {
          * @param trigger_time_str 触发动作时间 (格式: dd/mm/yyyy,hh:mm:ss.ssssss)
          */
         inline void setTimestamps(const std::string &start_time_str, const std::string &trigger_time_str) {
-            cfg_.start_time = utils::parseTime(start_time_str);
-            cfg_.trigger_time = utils::parseTime(trigger_time_str);
+            cfg_.utc_offset_known = cfg_.version == StandardVersion::V2013 && utils::parseUtcOffset(cfg_.time_code, cfg_.utc_offset_minutes);
+            cfg_.start_time = utils::parseTime(start_time_str, cfg_.utc_offset_known, cfg_.utc_offset_minutes);
+            cfg_.trigger_time = utils::parseTime(trigger_time_str, cfg_.utc_offset_known, cfg_.utc_offset_minutes);
         }
 
     private:
-        bool appendDecodedSample(const std::uint64_t raw_timestamp,
-                                 const std::vector<double>& analog_values,
-                                 const std::vector<bool>& digital_values) {
-            // RecordData 延续公开 API：保存按 TIMEMULT 换算后的 uint32 微秒偏移。
-            const long double timestamp_us = static_cast<long double>(raw_timestamp) *
-                                             static_cast<long double>(cfg_.time_multiplier);
-            if (!std::isfinite(timestamp_us) || timestamp_us < 0.0L ||
-                timestamp_us > static_cast<long double>(std::numeric_limits<std::uint32_t>::max())) {
-                return false;
-            }
-
-            data_.timestamp.push_back(static_cast<std::uint32_t>(std::llround(timestamp_us)));
-            for (std::size_t channel = 0; channel < analog_values.size(); ++channel) {
-                data_.analog_values[channel].push_back(analog_values[channel]);
-            }
-            for (std::size_t channel = 0; channel < digital_values.size(); ++channel) {
-                data_.digital_values[channel].push_back(digital_values[channel]);
-            }
-            return true;
+        template<class Processor>
+        bool readSamples(const StreamReader& reader, Processor process) {
+            RecordData decoded;
+            decoded.analog_values.resize(cfg_.analog_count); decoded.digital_values.resize(cfg_.digital_count);
+            try {
+                process([&](const SampleRow& row) {
+                    decoded.timestamp.push_back(row.timestamp_us);
+                    decoded.time_offset_ns.push_back(row.time_offset.count());
+                    for (size_t i=0;i<row.analog_values.size();++i) decoded.analog_values[i].push_back(row.analog_values[i]);
+                    for (size_t i=0;i<row.digital_values.size();++i) decoded.digital_values[i].push_back(row.digital_values[i]);
+                });
+            } catch (const std::exception&) { return false; }
+            data_ = std::move(decoded); warnings_ = reader.getWarnings(); return true;
         }
-
-        bool parseAsciiDat(std::istream& file) {
-            const auto analog_count = static_cast<std::size_t>(cfg_.analog_count);
-            const auto digital_count = static_cast<std::size_t>(cfg_.digital_count);
-            std::vector<double> analog_values(analog_count);
-            std::vector<bool> digital_values(digital_count);
-
-            std::string line;
-            bool first_line = true;
-            while (std::getline(file, line)) {
-                if (first_line) {
-                    detail::stripUtf8Bom(line);
-                    first_line = false;
-                }
-                const auto tokens = utils::split(line);
-                if (tokens.size() < 2U + analog_count + digital_count) continue;
-
-                try {
-                    const auto raw_timestamp = std::stoull(tokens[1]);
-                    for (std::size_t channel = 0; channel < analog_count; ++channel) {
-                        const auto raw_value = std::stod(tokens[2U + channel]);
-                        const auto& definition = cfg_.analog_channels[channel];
-                        analog_values[channel] = raw_value * definition.a + definition.b;
-                    }
-                    for (std::size_t channel = 0; channel < digital_count; ++channel) {
-                        digital_values[channel] =
-                            std::stoul(tokens[2U + analog_count + channel]) != 0U;
-                    }
-                    appendDecodedSample(raw_timestamp, analog_values, digital_values);
-                } catch (const std::exception&) {
-                    // 与流式读取一致：坏行不影响后续完整采样点。
-                    continue;
-                }
-            }
-            return true;
-        }
-
-        bool parseBinaryDat(std::istream& file) {
-            const auto analog_count = static_cast<std::size_t>(cfg_.analog_count);
-            const auto digital_count = static_cast<std::size_t>(cfg_.digital_count);
-            const auto row_size = detail::binaryRowSize(cfg_.data_type, analog_count, digital_count);
-            std::vector<char> encoded_row(row_size);
-            std::vector<double> analog_values(analog_count);
-            std::vector<bool> digital_values(digital_count);
-
-            while (file.read(encoded_row.data(), static_cast<std::streamsize>(encoded_row.size()))) {
-                const char* cursor = encoded_row.data();
-                static_cast<void>(detail::readUint32LittleEndian(cursor)); // sample number
-                const auto raw_timestamp = detail::readUint32LittleEndian(cursor);
-
-                for (std::size_t channel = 0; channel < analog_count; ++channel) {
-                    double raw_value = 0.0;
-                    if (cfg_.data_type == DataType::BINARY) {
-                        raw_value = detail::readInt16LittleEndian(cursor);
-                    } else if (cfg_.data_type == DataType::BINARY32) {
-                        raw_value = detail::readInt32LittleEndian(cursor);
-                    } else {
-                        raw_value = detail::readFloat32LittleEndian(cursor);
-                    }
-                    const auto& definition = cfg_.analog_channels[channel];
-                    analog_values[channel] = raw_value * definition.a + definition.b;
-                }
-
-                for (std::size_t word_index = 0;
-                     word_index < detail::digitalWordCount(digital_count);
-                     ++word_index) {
-                    const auto word = detail::readUint16LittleEndian(cursor);
-                    for (std::size_t bit = 0; bit < 16U; ++bit) {
-                        const auto channel = word_index * 16U + bit;
-                        if (channel >= digital_count) break;
-                        digital_values[channel] = (word & (std::uint16_t{1} << bit)) != 0U;
-                    }
-                }
-
-                appendDecodedSample(raw_timestamp, analog_values, digital_values);
-            }
-            return true;
-        }
-
+        ReadOptions options_;
+        Warnings warnings_;
+        std::string header_, information_;
         CfgData cfg_;
         RecordData data_;
     };
