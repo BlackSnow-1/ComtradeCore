@@ -617,6 +617,58 @@ namespace {
             EXPECT_DOUBLE_EQ(segment_rates[i], cfg.sample_rates[segment_indices[i]].samples_per_second);
     }
 
+    TEST_F(StreamEngineTest, MultiRateSegmentsRoundTripAllFormatsAndResetOnRepeatedReads) {
+        const std::vector<uint32_t> timestamps{0, 1000, 1500, 2000, 2500, 3000, 3250, 3500, 3750, 4000};
+        const std::vector<std::size_t> segments{0, 0, 1, 1, 1, 1, 2, 2, 2, 2};
+        const std::vector<double> rates{1000, 1000, 2000, 2000, 2000, 2000, 4000, 4000, 4000, 4000};
+        for (const auto format : {comtrade::DataType::ASCII, comtrade::DataType::BINARY,
+                                  comtrade::DataType::BINARY32, comtrade::DataType::FLOAT32}) {
+            SCOPED_TRACE(comtrade::DataTypeUtils::ToString(format));
+            for (const bool variable : {false, true}) {
+                SCOPED_TRACE(variable);
+                auto cfg = makeCfg(format, 1, 1);
+                cfg.version = comtrade::StandardVersion::V2013;
+                cfg.variable_sample_rate = variable;
+                cfg.sample_rates = {{1000.0, 2}, {2000.0, 6}, {4000.0, 10}};
+                saveCfg(cfg_path_, cfg);
+
+                comtrade::StreamWriter writer(cfg);
+                ASSERT_TRUE(writer.open(dat_path_.string()));
+                for (std::size_t i = 0; i < timestamps.size(); ++i)
+                    writer.pushRow(timestamps[i], {double(i)}, {i % 2 != 0});
+                writer.close();
+
+                const comtrade::StreamReader reader(cfg_path_.string());
+                EXPECT_EQ(reader.getCfg().variable_sample_rate, variable);
+                ASSERT_EQ(reader.getCfg().sample_rates.size(), 3U);
+                for (std::size_t i = 0; i < 3; ++i) {
+                    EXPECT_DOUBLE_EQ(reader.getCfg().sample_rates[i].samples_per_second,
+                                     cfg.sample_rates[i].samples_per_second);
+                    EXPECT_EQ(reader.getCfg().sample_rates[i].end_sample, cfg.sample_rates[i].end_sample);
+                }
+                // 同一 Reader 重读时必须从第一段开始，不能沿用上一次的末段游标。
+                for (int pass = 0; pass < 2; ++pass) {
+                    SCOPED_TRACE(pass);
+                    std::vector<comtrade::SampleRow> rows;
+                    ASSERT_EQ(reader.processDatStream(dat_path_.string(), [&](const auto& row) {
+                        rows.push_back(row);
+                    }), timestamps.size());
+                    ASSERT_EQ(rows.size(), timestamps.size());
+                    for (std::size_t i = 0; i < rows.size(); ++i) {
+                        SCOPED_TRACE(i);
+                        EXPECT_EQ(rows[i].index, i + 1);
+                        EXPECT_EQ(rows[i].segment_index, segments[i]);
+                        EXPECT_DOUBLE_EQ(rows[i].segment_sample_rate, rates[i]);
+                        EXPECT_EQ(rows[i].timestamp_us, timestamps[i]);
+                        EXPECT_EQ(rows[i].time_offset, std::chrono::microseconds(timestamps[i]));
+                        EXPECT_DOUBLE_EQ(rows[i].analog_values.at(0), double(i));
+                        EXPECT_EQ(rows[i].digital_values.at(0), i % 2 != 0);
+                    }
+                }
+            }
+        }
+    }
+
     TEST_F(StreamEngineTest, NoSampleRateSegmentsLeaveSegmentFieldsAtDefault) {
         // 没有采样段信息（sample_rates 为空）时，两个字段保持默认值 0，不做任何猜测。
         auto cfg = makeCfg(comtrade::DataType::ASCII, 1, 0);

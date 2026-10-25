@@ -2,6 +2,26 @@
 
 ## 测试分层
 
+### 单元测试与 CI/CD
+
+`test_record.cpp` 和 `test_stream.cpp` 属于 CTest `unit` 分类；多段采样率测试包含在其中，
+覆盖四种 DAT 格式、分段边界、`nrates=0` 和重复读取。`test_real_files.cpp` 属于 `accuracy` 分类，
+使用下面列出的 7 组 Git LFS 真实录波，共 8 项测试（Siemens 另有精确数值基线）。
+
+GitHub Actions 的 Linux GCC、Linux Clang、macOS 和 Windows 作业均选择性下载这些 CFG/DAT，
+启用 `COMTRADE_REQUIRE_REAL_FIXTURES=ON`，分别执行两类测试并上传 JUnit 报告，保留 14 天。
+LFS 下载失败、文件缺失、仍为指针或测试选择为空都会使 CI 失败，不能以跳过真实文件测试的方式通过。
+Release 工作流复用该 CI，所有验证通过后才发布。这里只测试列出的基线文件，并非遍历整个 LFS 数据集。
+
+本地默认允许跳过尚未下载的 LFS 指针；与 CI 一致的验证方式为先执行下方的 `git lfs pull`，然后运行：
+
+```bash
+cmake -S . -B build -DCOMTRADE_BUILD_TESTS=ON -DCOMTRADE_REQUIRE_REAL_FIXTURES=ON
+cmake --build build --config Release --parallel
+ctest --test-dir build -C Release -L unit --no-tests=error --output-on-failure --output-junit unit-tests.xml
+ctest --test-dir build -C Release -L accuracy --no-tests=error --output-on-failure --output-junit accuracy-tests.xml
+```
+
 ### 准确性测试
 
 `test_real_files.cpp` 参数化覆盖当前测试数据中的全部 6 组 ASCII 录波，并额外验证一组真实 BINARY

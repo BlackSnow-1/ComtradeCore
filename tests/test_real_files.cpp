@@ -73,6 +73,8 @@ TEST_P(ComtradeAsciiFileTest, StreamsEverySampleWithConsistentTimeAndChannelShap
     ASSERT_TRUE(fs::exists(cfg_path)) << cfg_path;
     ASSERT_TRUE(fs::exists(dat_path)) << dat_path;
     if (isGitLfsPointer(cfg_path) || isGitLfsPointer(dat_path)) {
+        ASSERT_FALSE(COMTRADE_REQUIRE_REAL_FIXTURES)
+            << "Required real fixture is a Git LFS pointer; run git lfs pull first: " << cfg_path;
         GTEST_SKIP() << "COMTRADE fixture is a Git LFS pointer; run git lfs pull first: " << cfg_path;
     }
 
@@ -137,6 +139,8 @@ TEST(ComtradeRealFileAccuracy, SiemensAsciiRecordingMatchesReferenceValues) {
     ASSERT_TRUE(fs::exists(cfg_path)) << cfg_path;
     ASSERT_TRUE(fs::exists(dat_path)) << dat_path;
     if (isGitLfsPointer(cfg_path) || isGitLfsPointer(dat_path)) {
+        ASSERT_FALSE(COMTRADE_REQUIRE_REAL_FIXTURES)
+            << "Required real fixture is a Git LFS pointer; run git lfs pull first: " << cfg_path;
         GTEST_SKIP() << "Real COMTRADE fixture is a Git LFS pointer; run git lfs pull first.";
     }
 
@@ -233,6 +237,8 @@ TEST(ComtradeRealFileAccuracy, BinaryRecordingMatchesReferenceValues) {
     ASSERT_TRUE(fs::exists(cfg_path)) << cfg_path;
     ASSERT_TRUE(fs::exists(dat_path)) << dat_path;
     if (isGitLfsPointer(cfg_path) || isGitLfsPointer(dat_path)) {
+        ASSERT_FALSE(COMTRADE_REQUIRE_REAL_FIXTURES)
+            << "Required real fixture is a Git LFS pointer; run git lfs pull first: " << cfg_path;
         GTEST_SKIP() << "Real COMTRADE fixture is a Git LFS pointer; run git lfs pull first.";
     }
 
