@@ -67,28 +67,6 @@ struct Window {
     std::vector<Statistics> stats;
 };
 
-std::int64_t physicalRows(const std::filesystem::path &path, const CfgData &cfg) {
-    if (cfg.data_type != DataType::ASCII) {
-        auto width = 8 + std::uint64_t(cfg.analog_count) * (cfg.data_type == DataType::BINARY ? 2 : 4) +
-                     2 * ((std::uint64_t(cfg.digital_count) + 15) / 16);
-        auto size = std::filesystem::file_size(path);
-        return size / width + (size % width != 0);
-    }
-    std::ifstream file(path, std::ios::binary);
-    detail::require(bool(file), "Cannot open DAT");
-    std::int64_t lines = 0;
-    char last = '\n';
-    std::array<char, 65536> block{};
-    while (file.read(block.data(), block.size()) || file.gcount()) {
-        for (std::streamsize i = 0; i < file.gcount(); ++i)
-            if (block[size_t(i)] == '\n')
-                ++lines;
-        last = block[size_t(file.gcount() - 1)];
-    }
-    detail::require(file.eof(), "DAT read failed");
-    return lines + (last != '\n');
-}
-
 } // namespace
 
 // 详见 docs/ai-analysis.md 中"分析定义和边界"，了解每个字段的取舍和限制。
@@ -101,12 +79,11 @@ inline Json summarize(const std::filesystem::path &cfgPath, const std::filesyste
     detail::require(cfg.analog_count >= 0 && cfg.digital_count >= 0 &&
                         std::int64_t(cfg.analog_count) + cfg.digital_count <= config.maxChannels,
                     "Channel limit exceeded");
-    // CFF DAT is read in place. Count rows with the same bounded stream, without buffering payload.
-    int64_t rows;
-    if (reader.isCff()) {
-        reader.processCffStream([](const SampleRow&) {});
-        rows = static_cast<int64_t>(reader.getPhysicalRowCount());
-    } else rows = physicalRows(datPath, cfg);
+    // The reader owns the boundary decision for both standalone DAT and CFF.
+    // This avoids counting arbitrary footer newlines/bytes as waveform samples.
+    if (reader.isCff()) reader.processCffStream([](const SampleRow&) {});
+    else reader.processDatStream(datPath.u8string(), [](const SampleRow&) {});
+    const auto rows = static_cast<int64_t>(reader.getPhysicalRowCount());
     if (config.fullWaveform)
         detail::require(rows <= config.maxWaveformSamples, "Full waveform sample limit exceeded");
     std::vector<Statistics> all(cfg.analog_count), before(cfg.analog_count), after(cfg.analog_count);
@@ -251,7 +228,7 @@ inline Json summarize(const std::filesystem::path &cfgPath, const std::filesyste
         warnings.push_back("Digital event list truncated; transition totals are complete.");
     if (trigger < firstTime || trigger > lastTime)
         warnings.push_back("Trigger lies outside sampled time range.");
-    Json result{{"schemaVersion", 3},
+    Json result{{"schemaVersion", 4},
                 {"samples", samples},
                 {"physicalRows", rows},
                 {"cfgExpectedSamples", expected},
@@ -264,6 +241,11 @@ inline Json summarize(const std::filesystem::path &cfgPath, const std::filesyste
                 {"triggerOffsetNs", std::to_string(trigger)},
                 {"utcOffsetKnown", cfg.utc_offset_known},
                 {"parserWarnings", parserWarnings},
+                {"datTail", Json{{"offset", std::to_string(reader.getDatTail().offset)},
+                                 {"byteCount", std::to_string(reader.getDatTail().byte_count)},
+                                 {"retainedBytes", reader.getDatTail().bytes.size()},
+                                 {"truncated", reader.getDatTail().truncated},
+                                 {"contentsIncluded", false}}},
                 {"timeCode", cfg.time_code},
                 {"localCode", cfg.local_code},
                 {"timeQuality", cfg.time_quality_code},

@@ -1115,5 +1115,40 @@ Java 同步提供 `loadCff/saveCff`、`getWarnings`、HDR/INF 文本、`getTimeO
 
 AI 的 `summarizeCff(path, config)` 与 Java `ComtradeAI.summarizeCff` 可直接汇总 CFF。
 CLI 支持 `comtrade-ai summarize config.json input.cff output.json`（analyze 同样适用）。
-证据 schemaVersion 为 3，新增结构化 `parserWarnings` 和 `utcOffsetKnown`。摘要模式遇到坏行或残缺尾行
+证据 schemaVersion 为 4，新增结构化 `parserWarnings` 和 `utcOffsetKnown`。摘要模式遇到坏行或残缺尾行
 保留完整采样并警告；full 模式拒绝残缺或非有限值。警告会进入模型证据和 PDF，CLI 同时输出到 stderr。
+
+
+### DAT 末尾的厂家附加数据
+
+默认 `ReadOptions::dat_tail_policy = DatTailPolicy::AfterCfgSamples`：当 CFG 给出了非零结束采样号时，
+ASCII 在读到该序号的标准采样后停止，二进制在读完 CFG 声明数量的固定长度记录后停止。
+其余字节作为**不透明尾部**保留；即使它刚好等于一条或多条二进制采样记录长度，也不计入波形。
+该边界依据 CFG，不能证明附加数据一定来自厂家：如果 CFG 样本数偏小，真实额外采样也会进入尾部，
+此时会警告，应改用 `DatTailPolicy::ParseToEnd` 后重新读取。未声明有效结束采样号时，不猜测二进制尾部布局。
+残缺的标准采样仍按损坏数据告警；ASCII 最后一个标准采样需要有完整行边界才能可靠区分尾部。
+
+`StreamReader::getDatTail()` 和 `Record::getDatTail()` 返回 `offset`（相对 DAT 载荷起点）、`byte_count`、
+原始 `bytes` 和 `truncated`。支持 NUL、非 UTF-8、文本和任意二进制数据，不对字段内容作厂商含义推断。
+默认最多在内存保留 1 MiB，`ReadOptions::max_retained_tail_bytes` 可调整；总长度始终统计。
+大尾部通过 `StreamReader::setDatTailHandler` 分块读取，回调能取得超过保留上限的全部字节，内存不随尾部增长：
+
+```cpp
+comtrade::StreamReader reader("capture.cfg");
+std::ofstream tail("vendor-tail.bin", std::ios::binary);
+reader.setDatTailHandler([&](const char* bytes, size_t size, uint64_t offset) {
+    tail.write(bytes, static_cast<std::streamsize>(size));
+    if (!tail) throw std::runtime_error("Cannot write vendor tail");
+});
+reader.processDatStream("capture.dat", [](const comtrade::SampleRow& row) { /* 标准波形 */ });
+```
+
+Record 可用 `saveDatTail(path)` 单独原样导出已完整保留的尾部；若预览已截断，该接口返回 false，
+避免把不完整内容作为完整尾部导出。默认 `saveDat` / `saveCff` 输出标准波形，并以
+`dat.vendor_tail_omitted` 警告不会附带尾部。显式调用 `saveDat(path, true)` / `saveCff(path, true)`
+可把完整尾部原样复制，并产生 `dat.vendor_tail_copied`：**不计算厂家校验码，也不更新内部偏移或签名**。
+因此原样复制并不保证厂家软件接受重新序列化或编辑后的文件。需要字节级档案时应保留原始整个文件。
+
+Java 提供 `getDatTail()`（byte[] 保留二进制）、`setDatTailPolicy`、`setMaxRetainedDatTailBytes`、
+`saveDatTail` 和带复制参数的保存接口。AI 证据 schemaVersion 4 的 `datTail` 只包含边界、长度和截断状态，
+不把厂家原文或二进制上传模型。尾部不参与统计、采样数量或 full 模式波形；标准区域损坏仍会被报告。

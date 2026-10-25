@@ -215,3 +215,11 @@ CI 为 Linux GCC/Clang、Windows MSVC、macOS Clang 构建 AI 并执行安装后
 `utcOffsetKnown`。缺失模拟量不参加统计，计入 nonFiniteValues；全缺失通道仅输出 count=0。
 时间轴默认对缺失时间重建并警告，timeCode 决定 UTC 偏移，localCode 仅作元数据。
 摘要模式尽量恢复；full 模式仍拒绝残缺数据和非有限值。完整性校验不是标准合规认证。
+
+
+### DAT 厂家尾部（schemaVersion 4）
+
+CFG 给出非零结束采样号时，默认在该采样范围后隔离不透明尾部。`datTail` 记录 offset/byteCount
+（十进制字符串）、retainedBytes、truncated 和 contentsIncluded=false。厂家字节不上传，也不作为测量值。
+full 模式的完整性仅针对 CFG 标准采样区域，允许存在独立尾部；区域内部坏行和残缺记录仍拒绝。
+如果 CFG 数量本身错误，需先核对原文件；核心 C++/Java 可使用 ParseToEnd 策略重新读取。

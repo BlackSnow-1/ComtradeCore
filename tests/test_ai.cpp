@@ -196,8 +196,8 @@ TEST_F(Fixture, FullLimitsAndMalformedRows) {
     EXPECT_THROW(summarize(cfg, dat, c), std::runtime_error);
     c.maxRequestBytes = 10000;
     {
-        std::ofstream f(dat, std::ios::app);
-        f << "bad-row\n";
+        std::ofstream f(dat);
+        f << "1,0,0,0\nbad-row\n2,1000,1,1\n3,2000,2,0\n4,3000,3,1\n";
     }
     EXPECT_THROW(summarize(cfg, dat, c), std::runtime_error);
     c.fullWaveform = false;
@@ -206,12 +206,9 @@ TEST_F(Fixture, FullLimitsAndMalformedRows) {
     EXPECT_THROW(summarize(cfg, dat, c), std::runtime_error);
     EXPECT_THROW(summarize(cfg, dir / "missing.dat", Config{}), std::runtime_error);
 }
-TEST_F(Fixture, PartialBinaryWarnsInSummaryAndRejectsFullWaveform) {
+TEST_F(Fixture, IncompleteStandardBinaryRecordStillRejectsFullWaveform) {
     make(comtrade::DataType::BINARY);
-    {
-        std::ofstream f(dat, std::ios::app | std::ios::binary);
-        f << 'x';
-    }
+    fs::resize_file(dat, fs::file_size(dat)-1);
     auto evidence = summarize(cfg, dat, Config{});
     EXPECT_FALSE(evidence["parserWarnings"].empty());
     Config full; full.fullWaveform = true;
@@ -221,13 +218,13 @@ TEST_F(Fixture, QualityWarningsAndNonFinite) {
     make();
     {
         std::ofstream f(dat);
-        f << "1,0,1,0\n3,0,nan,1\n4,0,2,0\n5,1,3,0\n";
+        f << "1,0,1,0\n3,0,nan,1\n2,2000,2,0\n4,3000,3,0\n";
     }
     auto e = summarize(cfg, dat, Config{});
     EXPECT_EQ(e["nonFiniteValues"], 1);
     EXPECT_EQ(e["nonIncreasingTimes"], 1);
     EXPECT_FALSE(e["parserWarnings"].empty());
-    EXPECT_EQ(e["indexDiscontinuities"], 1);
+    EXPECT_EQ(e["indexDiscontinuities"], 3);
     Config c;
     c.fullWaveform = true;
     EXPECT_THROW(summarize(cfg, dat, c), std::runtime_error);
@@ -455,7 +452,22 @@ TEST_F(Fixture, CffEvidenceCarriesParserWarningsAndMissingValueCounts) {
     const auto cff = dir / "waveform.cff";
     ASSERT_TRUE(record.saveCff(cff.string()));
     auto e = summarizeCff(cff, Config{});
-    EXPECT_EQ(e["schemaVersion"], 3); EXPECT_EQ(e["samples"], 4);
+    EXPECT_EQ(e["schemaVersion"], 4); EXPECT_EQ(e["samples"], 4);
     EXPECT_EQ(e["analog"][0]["count"], 3); EXPECT_EQ(e["nonFiniteValues"], 1);
     EXPECT_FALSE(e["parserWarnings"].empty()); EXPECT_TRUE(e["utcOffsetKnown"].get<bool>());
+}
+
+TEST_F(Fixture, VendorTailDoesNotAffectFullWaveformStatisticsOrLeakToModelEvidence) {
+    for (auto type : {comtrade::DataType::ASCII, comtrade::DataType::BINARY, comtrade::DataType::BINARY32, comtrade::DataType::FLOAT32}) {
+        make(type);
+        const std::string tail = "PRIVATE-VENDOR-FOOTER\n1,99,1000,1\n";
+        { std::ofstream out(dat, std::ios::app | std::ios::binary); out << tail; }
+        Config config; config.fullWaveform=true;
+        auto e=summarize(cfg,dat,config);
+        EXPECT_EQ(e["physicalRows"],4); EXPECT_EQ(e["samples"],4);
+        EXPECT_EQ(e["analog"][0]["mean"],4); EXPECT_EQ(e["waveform"]["rows"].size(),4u);
+        EXPECT_EQ(e["datTail"]["byteCount"],std::to_string(tail.size()));
+        EXPECT_EQ(e.dump().find("PRIVATE-VENDOR-FOOTER"),std::string::npos);
+        EXPECT_FALSE(e["parserWarnings"].empty());
+    }
 }
