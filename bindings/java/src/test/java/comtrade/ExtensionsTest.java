@@ -27,6 +27,14 @@ public final class ExtensionsTest {
                 try (ComtradeStreamReader reader = new ComtradeStreamReader(path.toString())) {
                     require(reader.processCffStream(row -> { if (row.index==1) require(row.analogMissing[0]); })==2);
                     require(reader.getWarnings().length>0);
+                    try {
+                        Class<?> ai = Class.forName("comtrade.ComtradeAI");
+                        String evidence = (String) ai.getMethod("summarizeCff", String.class, String.class)
+                                .invoke(null, path.toString(), "{}");
+                        require(evidence.contains("parserWarnings") && evidence.contains("\"samples\":2"));
+                    } catch (ClassNotFoundException coreOnlyBuild) {
+                        // AI is deliberately absent when COMTRADE_BUILD_AI is off.
+                    }
                     try { reader.processCffStream(row -> { throw new IllegalStateException("callback"); }); throw new AssertionError(); }
                     catch (IllegalStateException expected) { require(expected.getMessage().equals("callback")); }
                 }

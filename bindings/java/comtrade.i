@@ -1,7 +1,7 @@
 %module(directors="1") ComtradeCoreNative
 %{
-#include "java_api.hpp"
 #include "ai_java_api.hpp"
+#include "java_api.hpp"
 %}
 
 // Map C++ exceptions and the facade's simple STL containers to Java types.
@@ -20,6 +20,7 @@ namespace std {
 // std_except.i alone only maps declared throw specifications. These C++17 methods
 // have none, so install explicit catches and preserve exceptions raised by callbacks.
 %catches(Swig::DirectorException, std::out_of_range, std::invalid_argument, std::overflow_error, std::exception);
+%catches(Swig::DirectorException) ComtradeNativeRowCallback::onRow;
 
 // Expose Java-safe facades, not chrono/vector<bool> implementation details.
 %include "java_api.hpp"
