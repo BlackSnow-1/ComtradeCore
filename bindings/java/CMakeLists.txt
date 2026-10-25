@@ -129,3 +129,7 @@ if(COMTRADE_BUILD_TESTS)
     add_test(NAME Java.Extensions COMMAND "${Java_JAVA_EXECUTABLE}"
         "-Djava.library.path=$<TARGET_FILE_DIR:ComtradeCoreJava>" -cp "${COMTRADE_JAVA_CLASSPATH}" comtrade.ExtensionsTest)
 endif()
+
+if(COMTRADE_BUILD_EXAMPLES)
+    add_subdirectory("${PROJECT_SOURCE_DIR}/examples/java" "${CMAKE_CURRENT_BINARY_DIR}/examples")
+endif()
