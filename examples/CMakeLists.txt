@@ -1,26 +1,20 @@
-# example/CMakeLists.txt
-
-# 1. 查找当前目录下所有的 .cpp 文件，存入 EXAMPLE_SOURCES 变量中
-file(GLOB EXAMPLE_SOURCES "*.cpp")
-
-# 2. 遍历每一个找出的 .cpp 文件
-foreach(source_file IN LISTS EXAMPLE_SOURCES)
-
-    # 提取不带后缀的文件名。例如: "high_perf_write.cpp" 提取出 "high_perf_write"
-    get_filename_component(target_name "${source_file}" NAME_WE)
-
-    # 为了避免和根目录其他目标重名，可以加个前缀 (可选)
-    set(exe_name "example_${target_name}")
-
-    # 自动创建可执行文件
-    add_executable(${exe_name} "${source_file}")
-
-    # 自动链接核心库 (假设你的 Header-only target 叫 ComtradeCore)
-    target_link_libraries(${exe_name} PRIVATE ComtradeCore)
-
-    # 统一输出到 build/bin 目录下
-    set_target_properties(${exe_name} PROPERTIES
-            RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
-    )
-
+# Standalone core examples; none requires external test data or a model account.
+set(COMTRADE_CORE_SCENARIOS record_formats stream_processing cff_roundtrip time_axis missing_and_warnings vendor_tail)
+foreach(name IN LISTS COMTRADE_CORE_SCENARIOS)
+    add_executable(example_${name} ${name}.cpp)
+    target_link_libraries(example_${name} PRIVATE comtrade::ComtradeCore)
+    set_target_properties(example_${name} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+    if(COMTRADE_BUILD_TESTS)
+        add_test(NAME Examples.${name} COMMAND example_${name})
+        set_tests_properties(Examples.${name} PROPERTIES LABELS "examples" WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+    endif()
+endforeach()
+add_executable(example_inspect_record inspect_record.cpp)
+target_link_libraries(example_inspect_record PRIVATE comtrade::ComtradeCore)
+set_target_properties(example_inspect_record PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+# Keep the original target names for existing consumers.
+foreach(name IN ITEMS record_lifecycle example_high_perf_write)
+    add_executable(example_${name} ${name}.cpp)
+    target_link_libraries(example_${name} PRIVATE comtrade::ComtradeCore)
+    set_target_properties(example_${name} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 endforeach()
