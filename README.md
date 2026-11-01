@@ -352,6 +352,10 @@ target_include_directories(your_app PRIVATE /path/to/ComtradeCore/include)
 
 ## Java 绑定
 
+Java 安装组件可用 `cmake --install <build> --component Java --prefix <prefix>` 单独安装。
+普通 Java 与 Java + AI 的安装后独立消费者测试及复现命令见
+[安装验证说明](.github/java-install-test/README.md)。
+
 Java 绑定提供 `comtrade.ComtradeRecord`、`ComtradeStreamReader` 和 `ComtradeStreamWriter`，覆盖内存型
 记录以及恒定内存流式读写。它由一个 JAR 和一个 JNI 动态库组成：Java 项目在编译期引入 JAR，运行时
 还必须能够找到当前平台对应的动态库。

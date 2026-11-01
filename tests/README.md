@@ -120,3 +120,11 @@ cmake --build build-benchmark --config Release \
 `test_cfg_validation.cpp` 覆盖完整数字转换、结构字段拒绝、可选字段默认值和警告、
 通道计数后缀兼容、数字通道编号、时间码、空白以及 DAT 非布尔数字量。
 规则见 [`docs/validation.md`](../docs/validation.md)。
+
+### Java 安装后的使用验证
+
+`.github/java-install-test` 是独立 CMake/Java 消费者工程，JDK 11+ 编译时只引用安装后的 JAR，
+运行时 JNI 搜索目录也只指向安装目录。覆盖普通 Java 和 Java + AI 两种构建配置；
+AI 模式强制执行摘要、CFF 完整波形、本地模拟 HTTP 模型交互及中文 PDF 导出，不允许缺少 AI 类时跳过。
+CI 分别运行两种配置并上传结果。可复现命令见
+[`Java 安装消费者说明`](../.github/java-install-test/README.md)。

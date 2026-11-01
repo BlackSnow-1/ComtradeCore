@@ -211,23 +211,50 @@ jobs:
           retention-days: 7
 
   java-integration:
-    name: Java JNI integration
+    name: Java JNI integration (AI=${{ matrix.ai }})
+    needs: ai-test-font
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        ai: ['OFF', 'ON']
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - name: Install JDK and SWIG
-        run: sudo apt-get update && sudo apt-get install -y default-jdk swig
+      - name: Install JDK, SWIG and AI development dependencies
+        run: sudo apt-get update && sudo apt-get install -y default-jdk swig libssl-dev
+      - uses: actions/download-artifact@v8
+        with:
+          name: ai-test-font
+          path: test-font
       - name: Configure Java and core tests
         run: >-
           cmake -S . -B build-java -DCMAKE_BUILD_TYPE=Release
           -DBUILD_JAVA_BINDINGS=ON -DCOMTRADE_BUILD_TESTS=ON
-          -DCOMTRADE_BUILD_EXAMPLES=ON
+          -DCOMTRADE_BUILD_AI=${{ matrix.ai }} -DCOMTRADE_BUILD_EXAMPLES=ON
       - run: cmake --build build-java --parallel 2
       - name: Run actual JVM integration tests and examples
-        run: ctest --test-dir build-java -R 'Java\.' --output-on-failure
+        run: ctest --test-dir build-java -R 'Java\.' --output-on-failure --no-tests=error
+      - name: Install JAR and JNI library into an independent prefix
+        run: cmake --install build-java --component Java --prefix "${{ github.workspace }}/staging-java"
+      - name: Compile independent consumer against the installed JAR
+        run: >-
+          cmake -S .github/java-install-test -B java-installed-consumer
+          -DCOMTRADE_JAVA_DIR="${{ github.workspace }}/staging-java/lib/comtrade/java"
+          -DCOMTRADE_EXPECT_AI=${{ matrix.ai }}
+          -DCOMTRADE_TEST_FONT="${{ github.workspace }}/test-font/wqy-microhei.ttc"
+      - run: cmake --build java-installed-consumer
+      - name: Run installed Java core or AI HTTP/PDF consumer
+        run: ctest --test-dir java-installed-consumer --output-on-failure --no-tests=error --output-junit java-install-results.xml
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: java-install-results-ai-${{ matrix.ai }}
+          path: |
+            java-installed-consumer/java-install-results.xml
+            java-installed-consumer/Testing/Temporary/LastTest.log
 
   openssl-source-fallback:
     name: OpenSSL GitHub source fallback
