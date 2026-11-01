@@ -277,3 +277,10 @@ AI 配置也支持 `caBundle` 指定可信 CA 文件。
 `SSL_CERT_FILE` / `SSL_CERT_DIR` 指向可信证书，不能通过关闭 TLS 验证解决证书错误。
 离线时还应提供 JSON/HTTP/PDF 的本地包或相应 `FETCHCONTENT_SOURCE_DIR_AI_JSON`、
 `FETCHCONTENT_SOURCE_DIR_AI_HTTP`、`FETCHCONTENT_SOURCE_DIR_AI_PDF`。
+
+## Java AI 安装验证
+
+Java + AI 会将静态 libharu 链接进 JNI 动态库。项目下载构建的 libharu 启用位置无关代码（PIC），
+保证 Linux 等平台能够完成共享库链接；若使用本地预编译的静态 libharu，也需要该库以 PIC 构建，
+或改用兼容的共享库。普通 Java 和 Java + AI 的独立安装消费者由 CI 分别验证，包含本地 HTTP 和 PDF，
+复现命令见 [Java 安装测试](../.github/java-install-test/README.md)。

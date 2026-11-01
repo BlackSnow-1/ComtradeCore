@@ -84,6 +84,9 @@ else()
     FetchContent_Declare(ai_pdf GIT_REPOSITORY https://github.com/libharu/libharu.git
         GIT_TAG 0c598becaadaef8e3d12b883f9fc2864a118c12d) # v2.4.4
     FetchContent_MakeAvailable(ai_pdf)
+    # The static PDF library is also linked into the Java JNI shared library.
+    # ELF platforms require every contributing object to be position independent.
+    set_target_properties(hpdf PROPERTIES POSITION_INDEPENDENT_CODE ON)
     set(COMTRADE_AI_PDF_FETCHED ON)
     set(COMTRADE_AI_PDF_FETCHED ON PARENT_SCOPE)
 endif()
