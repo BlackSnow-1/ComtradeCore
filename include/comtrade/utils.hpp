@@ -24,8 +24,8 @@ namespace comtrade::utils {
         std::istringstream tokenStream(s);
         while (std::getline(tokenStream, token, delimiter)) {
             // 去除首尾的空格和回车符 (\r)，兼容 Windows/Unix 换行
-            token.erase(0, token.find_first_not_of(" \r\n"));
-            token.erase(token.find_last_not_of(" \r\n") + 1);
+            token.erase(0, token.find_first_not_of(" \t\r\n"));
+            token.erase(token.find_last_not_of(" \t\r\n") + 1);
             tokens.push_back(token);
         }
         if (!s.empty() && s.back() == delimiter) tokens.emplace_back();

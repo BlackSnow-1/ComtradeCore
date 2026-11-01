@@ -240,7 +240,7 @@ private:
                 const auto parsed_timestamp = missing_time ? 0ULL : std::stoull(tokens[1], &timestamp_characters);
                 if (tokens[0].empty() || tokens[0].front() == '-' || (!missing_time && tokens[1].front() == '-') ||
                     index_characters != tokens[0].size() || timestamp_characters != tokens[1].size() ||
-                    parsed_index > std::numeric_limits<uint32_t>::max()) {
+                    parsed_index == 0 || parsed_index > std::numeric_limits<uint32_t>::max()) {
                     throw std::invalid_argument("Invalid index/timestamp");
                 }
                 row_buffer.index = static_cast<uint32_t>(parsed_index);
@@ -257,9 +257,9 @@ private:
 
                 for (int i = 0; i < cfg_.digital_count; ++i) {
                     const auto token_index = static_cast<std::size_t>(2 + cfg_.analog_count + i);
-                    size_t used = 0; const auto value = std::stoul(tokens[token_index], &used);
+                    size_t used = 0; const auto value = std::stoll(tokens[token_index], &used);
                     if (used != tokens[token_index].size()) throw std::invalid_argument("Invalid digital token");
-                    if (value > 1) addWarning(warnings_, "dat.digital_state", "Nonboolean digital value interpreted as nonzero", physical_row);
+                    if (value != 0 && value != 1) addWarning(warnings_, "dat.digital_state", "Nonboolean digital value interpreted as nonzero", physical_row);
                     row_buffer.digital_values[i] = value != 0;
                 }
             } catch (const std::exception&) {

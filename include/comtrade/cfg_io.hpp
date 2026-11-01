@@ -15,14 +15,42 @@
 #include <limits>
 #include <string>
 #include <utility>
+#include <type_traits>
 #include <vector>
 
 namespace comtrade::detail {
 
-// 通道计数字段形如 "12A" 或 "29D"，数值部分位于类型后缀之前。
-inline int parseChannelCount(const std::string& token, char suffix) {
-    const auto suffix_position = token.find(suffix);
-    return std::stoi(token.substr(0, suffix_position));
+// Numeric fields consume the entire trimmed token; never accept a numeric prefix.
+template<class T>
+inline T cfgNumber(const std::string& text) {
+    const auto fields = utils::split(text);
+    if (fields.size() != 1 || fields[0].empty()) throw std::invalid_argument("Empty CFG number");
+    const auto& token = fields[0];
+    size_t used = 0;
+    if constexpr (std::is_integral_v<T>) {
+        const auto number = std::stoll(token, &used);
+        if (used != token.size() || number < std::numeric_limits<T>::lowest() ||
+            number > std::numeric_limits<T>::max()) throw std::invalid_argument("Invalid CFG integer");
+        return static_cast<T>(number);
+    } else {
+        const auto number = std::stod(token, &used);
+        if (used != token.size() || !std::isfinite(number)) throw std::invalid_argument("Invalid CFG number");
+        return static_cast<T>(number);
+    }
+}
+
+inline int parseChannelCount(const std::string& token, char suffix, Warnings& warnings) {
+    auto number = token;
+    if (!number.empty() && (number.back() == suffix || number.back() == static_cast<char>(std::tolower(suffix)))) {
+        if (number.back() != suffix) addWarning(warnings, "cfg.channel_suffix", "Lowercase channel-count suffix accepted", 2);
+        number.pop_back();
+    } else {
+        // A missing suffix is unambiguous only if the complete field is an integer.
+        addWarning(warnings, "cfg.channel_suffix", "Missing channel-count suffix accepted", 2);
+    }
+    const auto count = cfgNumber<int>(number);
+    if (count < 0) throw std::invalid_argument("Negative channel count");
+    return count;
 }
 
 // 采样段必须完整匹配 "samples_per_second,end_sample"；完整匹配可以将其与日期行可靠区分。
@@ -54,11 +82,7 @@ inline void optionalNumber(const std::vector<std::string>& fields, size_t index,
         addWarning(warnings, "cfg.optional_default", "Missing optional channel number; using default", row); return;
     }
     try {
-        size_t used = 0; const double parsed = std::stod(fields[index], &used);
-        if (!std::isfinite(parsed) || used != fields[index].size() ||
-            parsed < static_cast<double>(std::numeric_limits<T>::lowest()) ||
-            parsed > static_cast<double>(std::numeric_limits<T>::max())) throw std::invalid_argument("Invalid metadata");
-        value = static_cast<T>(parsed);
+        value = cfgNumber<T>(fields[index]);
     } catch (const std::exception&) {
         addWarning(warnings, "cfg.optional_default", "Invalid optional channel number; using default", row);
     }
@@ -69,17 +93,26 @@ inline bool parseCfgLines(const std::vector<std::string>& lines, CfgData& cfg) {
     if (lines.size() < 2) return false;
 
     CfgData parsed_cfg;
+    auto extraFields = [&](const std::vector<std::string>& fields, size_t expected, uint64_t row) {
+        if (fields.size() > expected)
+            addWarning(parsed_cfg.warnings, "cfg.extra_columns", "Extra CFG fields ignored", row);
+    };
     const auto identity = utils::split(lines[0]);
     const auto counts = utils::split(lines[1]);
     if (identity.size() < 2 || counts.size() < 3) return false;
 
+    extraFields(identity, 3, 1); extraFields(counts, 3, 2);
     parsed_cfg.station_name = identity[0];
     parsed_cfg.rec_dev_id = identity[1];
     if (identity.size() > 2) parsed_cfg.version = utils::determineVersion(identity[2]);
 
-    parsed_cfg.total_channels = std::stoi(counts[0]);
-    parsed_cfg.analog_count = parseChannelCount(counts[1], 'A');
-    parsed_cfg.digital_count = parseChannelCount(counts[2], 'D');
+    try { parsed_cfg.total_channels = cfgNumber<int>(counts[0]); }
+    catch (const std::exception&) {
+        parsed_cfg.total_channels = -1;
+        addWarning(parsed_cfg.warnings, "cfg.total_default", "Invalid total channel count; using A/D counts", 2);
+    }
+    parsed_cfg.analog_count = parseChannelCount(counts[1], 'A', parsed_cfg.warnings);
+    parsed_cfg.digital_count = parseChannelCount(counts[2], 'D', parsed_cfg.warnings);
     if (parsed_cfg.analog_count < 0 || parsed_cfg.digital_count < 0 ||
         static_cast<uint64_t>(parsed_cfg.analog_count) + parsed_cfg.digital_count > lines.size()) return false;
     if (parsed_cfg.total_channels != parsed_cfg.analog_count + parsed_cfg.digital_count) {
@@ -97,14 +130,16 @@ inline bool parseCfgLines(const std::vector<std::string>& lines, CfgData& cfg) {
         const auto tokens = utils::split(lines[cursor]);
         if (tokens.size() < 7) return false;
 
+        extraFields(tokens, 13, cursor+1);
         AnalogChannel channel;
-        channel.index = std::stoi(tokens[0]);
+        channel.index = i + 1;
+        optionalNumber(tokens, 0, channel.index, parsed_cfg.warnings, cursor+1);
         channel.id = tokens[1];
         if (tokens.size() > 2) channel.phase = tokens[2];
         if (tokens.size() > 3) channel.ccbm = tokens[3];
         if (tokens.size() > 4) channel.uu = tokens[4];
-        channel.a = std::stod(tokens[5]);
-        channel.b = std::stod(tokens[6]);
+        channel.a = cfgNumber<double>(tokens[5]);
+        channel.b = cfgNumber<double>(tokens[6]);
         optionalNumber(tokens, 7, channel.skew, parsed_cfg.warnings, cursor+1);
         optionalNumber(tokens, 8, channel.min, parsed_cfg.warnings, cursor+1);
         optionalNumber(tokens, 9, channel.max, parsed_cfg.warnings, cursor+1);
@@ -120,8 +155,10 @@ inline bool parseCfgLines(const std::vector<std::string>& lines, CfgData& cfg) {
         const auto tokens = utils::split(lines[cursor]);
         if (tokens.size() < 2) return false;
 
+        extraFields(tokens, 5, cursor+1);
         DigitalChannel channel;
-        channel.index = std::stoi(tokens[0]);
+        channel.index = i + 1;
+        optionalNumber(tokens, 0, channel.index, parsed_cfg.warnings, cursor+1);
         channel.id = tokens[1];
         if (tokens.size() > 2) channel.phase = tokens[2];
         if (tokens.size() > 3) channel.ccbm = tokens[3];
@@ -131,14 +168,14 @@ inline bool parseCfgLines(const std::vector<std::string>& lines, CfgData& cfg) {
 
     if (cursor >= lines.size()) return false;
     try {
-        size_t used = 0; const double frequency = std::stod(lines[cursor], &used);
-        if (!std::isfinite(frequency) || frequency <= 0 || used != lines[cursor].find_last_not_of(" \r\n") + 1) throw std::invalid_argument("frequency");
+        const double frequency = cfgNumber<double>(lines[cursor]);
+        if (frequency <= 0) throw std::invalid_argument("frequency");
         parsed_cfg.line_frequency = frequency;
     } catch (...) { addWarning(parsed_cfg.warnings, "cfg.frequency", "Invalid nominal frequency; using 50 Hz", cursor+1); }
     ++cursor;
 
     if (cursor >= lines.size()) return false;
-    const int sample_rate_count = std::stoi(lines[cursor++]);
+    const int sample_rate_count = cfgNumber<int>(lines[cursor++]);
     if (sample_rate_count < 0 || cursor + static_cast<std::size_t>(sample_rate_count) + 3 > lines.size()) {
         return false;
     }
@@ -148,6 +185,7 @@ inline bool parseCfgLines(const std::vector<std::string>& lines, CfgData& cfg) {
     for (int i = 0; i < sample_rate_count; ++i, ++cursor) {
         SampleRate sample_rate;
         if (!tryParseSampleRate(lines[cursor], sample_rate)) return false;
+        extraFields(utils::split(lines[cursor]), 2, cursor+1);
         parsed_cfg.sample_rates.push_back(sample_rate);
     }
 
@@ -156,6 +194,7 @@ inline bool parseCfgLines(const std::vector<std::string>& lines, CfgData& cfg) {
     while (sample_rate_count == 0 && cursor < lines.size()) {
         SampleRate sample_rate;
         if (!tryParseSampleRate(lines[cursor], sample_rate)) break;
+        extraFields(utils::split(lines[cursor]), 2, cursor+1);
         parsed_cfg.sample_rates.push_back(sample_rate);
         ++cursor;
     }
@@ -171,6 +210,7 @@ inline bool parseCfgLines(const std::vector<std::string>& lines, CfgData& cfg) {
 
     const auto data_type_tokens = utils::split(lines[cursor++]);
     if (data_type_tokens.empty()) return false;
+    extraFields(data_type_tokens, 1, cursor);
     parsed_cfg.data_type = DataTypeUtils::FromString(data_type_tokens[0]);
 
     if (parsed_cfg.version != StandardVersion::V1991) {
@@ -179,7 +219,7 @@ inline bool parseCfgLines(const std::vector<std::string>& lines, CfgData& cfg) {
         else {
             const auto fields = utils::split(lines[cursor]);
             if (fields.size() == 1) {
-                try { parsed_cfg.time_multiplier = std::stod(lines[cursor]); }
+                try { parsed_cfg.time_multiplier = cfgNumber<double>(lines[cursor]); }
                 catch (...) { addWarning(parsed_cfg.warnings, "cfg.timemult", "Invalid TIMEMULT; using 1"); }
                 ++cursor;
             } else addWarning(parsed_cfg.warnings, "cfg.timemult", "Missing TIMEMULT; using 1");
@@ -210,19 +250,24 @@ inline bool parseCfgLines(const std::vector<std::string>& lines, CfgData& cfg) {
         parsed_cfg.time_code = "x"; parsed_cfg.local_code = "x";
         if (cursor < lines.size()) {
             const auto codes = utils::split(lines[cursor++]);
+            extraFields(codes, 2, cursor);
             if (!codes.empty()) parsed_cfg.time_code = codes[0];
             if (codes.size() > 1) parsed_cfg.local_code = codes[1];
         } else addWarning(parsed_cfg.warnings, "cfg.time_metadata", "Missing 2013 time codes");
         if (cursor < lines.size()) {
             const auto quality = utils::split(lines[cursor++]);
+            extraFields(quality, 2, cursor);
             if (!quality.empty()) parsed_cfg.time_quality_code = quality[0];
-            try { if (quality.size() > 1) parsed_cfg.leap_second = std::stoi(quality[1]); }
+            try { if (quality.size() > 1) parsed_cfg.leap_second = cfgNumber<int>(quality[1]); }
             catch (...) { addWarning(parsed_cfg.warnings, "cfg.leap_second", "Invalid leap second indicator; using 0"); }
         } else addWarning(parsed_cfg.warnings, "cfg.time_metadata", "Missing 2013 time quality");
         if (parsed_cfg.leap_second < 0 || parsed_cfg.leap_second > 3) {
             parsed_cfg.leap_second = 0;
             addWarning(parsed_cfg.warnings, "cfg.leap_second", "Invalid leap second indicator; using 0");
         }
+        int ignored_offset = 0;
+        if (parsed_cfg.local_code != "x" && !utils::parseUtcOffset(parsed_cfg.local_code, ignored_offset))
+            addWarning(parsed_cfg.warnings, "cfg.local_code", "Unrecognized local time code preserved");
         parsed_cfg.utc_offset_known = utils::parseUtcOffset(parsed_cfg.time_code, parsed_cfg.utc_offset_minutes);
         if (parsed_cfg.time_quality_code.size() != 1 ||
             std::string("0123456789ABCDEFabcdef").find(parsed_cfg.time_quality_code) == std::string::npos)
@@ -250,9 +295,12 @@ inline bool parseCfgLines(const std::vector<std::string>& lines, CfgData& cfg) {
         if (!c.a || c.min > c.max || c.secondary <= 0 || (c.ps != "P" && c.ps != "S"))
             addWarning(parsed_cfg.warnings, "cfg.analog_metadata", "Suspicious analog scale/range/ratio metadata preserved");
     }
-    for (const auto& c : parsed_cfg.digital_channels)
+    for (size_t i = 0; i < parsed_cfg.digital_channels.size(); ++i) {
+        const auto& c = parsed_cfg.digital_channels[i];
+        if (c.index != static_cast<int>(i+1)) addWarning(parsed_cfg.warnings, "cfg.channel_index", "Nonsequential digital channel ID", i+3+parsed_cfg.analog_count);
         if (c.normal_state != 0 && c.normal_state != 1)
             addWarning(parsed_cfg.warnings, "cfg.digital_state", "Nonboolean normal state preserved");
+    }
     if (cursor < lines.size()) addWarning(parsed_cfg.warnings, "cfg.trailing", "Trailing CFG extension preserved only in source file");
 
     cfg = std::move(parsed_cfg);
