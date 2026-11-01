@@ -32,11 +32,13 @@ jobs:
             name=$(basename "$path")
             tar -czf "archives/${name}-1.3.0.1.tar.gz" -C "$path" .
           done
+          cp release-assets/ComtradeCore-java-linux/lib/comtrade/java/comtrade-core-java.jar archives/comtrade-core-java-1.3.0.1.jar
+          cp release-assets/ComtradeCore-java-ai-linux/lib/comtrade/java/comtrade-core-java.jar archives/comtrade-core-java-ai-1.3.0.1.jar
       - name: Publish only after all CI jobs pass
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
-          gh release create v1.3.0.1 archives/*.tar.gz
+          gh release create v1.3.0.1 archives/*.tar.gz archives/*.jar
           --target "$GITHUB_SHA"
           --title "ComtradeCore 1.3.0.1"
           --notes-file docs/releases/1.3.0.1.md

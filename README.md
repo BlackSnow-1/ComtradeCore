@@ -352,6 +352,10 @@ target_include_directories(your_app PRIVATE /path/to/ComtradeCore/include)
 
 ## Java 绑定
 
+Release 同时提供普通版 `comtrade-core-java-1.3.0.1.jar` 和带 AI 的
+`comtrade-core-java-ai-1.3.0.1.jar`，二选一使用；JAR 仍需配套匹配系统的 JNI 本地库，
+Linux 用户可下载同一 Release 对应的 Java 安装包。
+
 Java 安装组件可用 `cmake --install <build> --component Java --prefix <prefix>` 单独安装。
 普通 Java 与 Java + AI 的安装后独立消费者测试及复现命令见
 [安装验证说明](.github/java-install-test/README.md)。
