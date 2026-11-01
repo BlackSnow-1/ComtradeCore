@@ -114,3 +114,9 @@ cmake --build build-benchmark --config Release \
 ```
 
 基准程序不设置固定性能门槛。共享 CI 主机的性能波动较大，应观察多次运行的趋势；若要设置回归阈值，应在固定硬件、自托管 runner 上建立历史基线。
+
+### 容错字段回归
+
+`test_cfg_validation.cpp` 覆盖完整数字转换、结构字段拒绝、可选字段默认值和警告、
+通道计数后缀兼容、数字通道编号、时间码、空白以及 DAT 非布尔数字量。
+规则见 [`docs/validation.md`](../docs/validation.md)。

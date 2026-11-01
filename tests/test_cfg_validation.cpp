@@ -54,6 +54,16 @@ TEST(CfgValidation, WhitespaceIsAcceptedAndValidEngineeringCoefficientsArePreser
     EXPECT_DOUBLE_EQ(cfg.analog_channels[0].a,-0.2); EXPECT_DOUBLE_EQ(cfg.analog_channels[0].b,3.5);
     EXPECT_DOUBLE_EQ(cfg.time_multiplier,0.001); EXPECT_FALSE(has(cfg,"cfg.optional_default"));
 }
+TEST(CfgValidation, ExtraFieldsAreIgnoredWithAggregatedLocatedWarnings) {
+    auto lines=validCfg(); lines[0]+=",vendor"; lines[3]+=",vendor"; lines[6]+=",vendor";
+    comtrade::CfgData cfg; ASSERT_TRUE(comtrade::detail::parseCfgLines(lines,cfg));
+    EXPECT_EQ(cfg.digital_channels[0].normal_state,0); EXPECT_EQ(cfg.sample_rates[0].end_sample,3u);
+    bool found=false;
+    for(const auto& w:cfg.warnings) if(w.code=="cfg.extra_columns") {
+        found=true; EXPECT_EQ(w.first_row,1u); EXPECT_EQ(w.count,3u);
+    }
+    EXPECT_TRUE(found);
+}
 TEST(CfgValidation, DatSkipsInvalidIndicesAndDigitalTokensButKeepsNonbooleanSignedStates) {
     comtrade::CfgData cfg; ASSERT_TRUE(comtrade::detail::parseCfgLines(validCfg(),cfg));
     comtrade::ReadOptions options; options.dat_tail_policy=comtrade::DatTailPolicy::ParseToEnd;
