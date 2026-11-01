@@ -128,3 +128,7 @@ ctest --test-dir build-examples -C Release -L examples --output-on-failure
 ```
 
 CI 在核心多平台矩阵试跑 C++ 示例，在 Java 作业中运行实际 JVM 示例。所有自动运行的示例均不调用真实模型。
+
+字段异常的恢复规则和警告代码见 [`docs/validation.md`](../docs/validation.md)。
+可选 AI 的 OpenSSL 本地优先、GitHub 源码回退与离线配置见
+[`docs/ai-analysis.md`](../docs/ai-analysis.md#openssl-本地优先与-github-源码回退)。

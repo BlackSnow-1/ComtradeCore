@@ -33,6 +33,17 @@ IEEE/IEC C37.111-2013 CFG 支持采样率段、时间倍率、小数秒精度、
 时间质量码和闰秒指示；当 `nrates=0` 时，可读取并保持后续0到任意数量的采样率段。
 下一版 PC37.111 仍在制定中，尚无可据以实现的正式发布版本。
 
+## 容错字段校验
+
+解析器对完整数字字段进行转换，不会把 `1abc` 静默解释成 `1`，整数元数据也不会把 `1.5` 截断。
+字段两端的空格、制表符和 CRLF 可以正常读取。处理规则与警告代码见
+[`docs/validation.md`](docs/validation.md)。可恢复的异常继续读取并通过 `getWarnings()` 报告；
+无法确定通道布局、工程量换算系数或有效日期时，读取失败，不编造数据。
+
+可选 AI 依赖采用“本地优先，缺失后从 GitHub 下载”的策略，包含 OpenSSL 3.x 开发文件。
+OpenSSL 源码回退需要 Perl、C 编译器和 make（MSVC 使用 nmake），首次配置可能持续数分钟。
+离线使用、本地路径覆盖及构建日志说明见 [`docs/ai-analysis.md`](docs/ai-analysis.md)。
+
 ## 可运行示例
 
 [`examples/README.md`](examples/README.md) 提供完整构建与运行命令，以及 C++ / Java 场景索引：
@@ -155,7 +166,8 @@ record.getMutableCfg().sample_rates = {
 `end_sample` 是累计结束采样号，包含该点，不是该段点数。`Record::saveCfg()` 保留全部段，默认写出
 实际段数；`variable_sample_rate=true` 时保留 `nrates=0` 的表示方式。未配置 `sample_rates` 时，
 保存 CFG 只会尝试由前两个时间戳推导单段采样率，不会自动识别多段。DAT 写入时间戳由调用方提供，
-读取时间按 DAT 时间戳和 `TIMEMULT` 换算，不根据分段采样率重建零时间戳。
+默认按 DAT 时间戳和 `TIMEMULT` 换算；缺失时间戳或首点之后的零时间戳可按采样序号和分段采样率重建，
+并产生警告。可用 `ReadOptions::time_axis` 显式选择保留 DAT 时间戳或强制按采样率重建。
 
 IEEE C37.111-2013 允许一份录波包含多段不同采样率（`cfg.sample_rates`，每段记录标称采样率和该段
 最后一个物理采样点的累计序号）。逐点流式处理这类录波时，如果只按固定时长分窗口或分批，无法知道
@@ -509,7 +521,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
   -Dfile="$PWD/install/lib/comtrade/java/comtrade-core-java.jar" \
   -DgroupId=io.github.blacksnow1 \
   -DartifactId=comtrade-core-java \
-  -Dversion=1.2.0.0 \
+  -Dversion=1.3.0.0 \
   -Dpackaging=jar \
   -DgeneratePom=true
 ```
@@ -520,7 +532,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
 <dependency>
     <groupId>io.github.blacksnow1</groupId>
     <artifactId>comtrade-core-java</artifactId>
-    <version>1.2.0.0</version>
+    <version>1.3.0.0</version>
 </dependency>
 ```
 
@@ -720,7 +732,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file `
   "-Dfile=D:\testjavaInterface\libs\comtrade-core-java.jar" `
   "-DgroupId=io.github.blacksnow1" `
   "-DartifactId=comtrade-core-java" `
-  "-Dversion=1.2.0.0" `
+  "-Dversion=1.3.0.0" `
   "-Dpackaging=jar" `
   "-DgeneratePom=true"
 ```
@@ -728,7 +740,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file `
 安装位置默认为：
 
 ```text
-%USERPROFILE%\.m2\repository\io\github\blacksnow1\comtrade-core-java\1.2.0.0\
+%USERPROFILE%\.m2\repository\io\github\blacksnow1\comtrade-core-java\1.3.0.0\
 ```
 
 随后在项目的 `pom.xml` 中声明：
@@ -737,7 +749,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file `
 <dependency>
     <groupId>io.github.blacksnow1</groupId>
     <artifactId>comtrade-core-java</artifactId>
-    <version>1.2.0.0</version>
+    <version>1.3.0.0</version>
 </dependency>
 ```
 
@@ -761,7 +773,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
   -Dfile=/path/to/comtrade-install/lib/comtrade/java/comtrade-core-java.jar \
   -DgroupId=io.github.blacksnow1 \
   -DartifactId=comtrade-core-java \
-  -Dversion=1.2.0.0 \
+  -Dversion=1.3.0.0 \
   -Dpackaging=jar \
   -DgeneratePom=true
 ```
@@ -772,7 +784,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
 <dependency>
     <groupId>io.github.blacksnow1</groupId>
     <artifactId>comtrade-core-java</artifactId>
-    <version>1.2.0.0</version>
+    <version>1.3.0.0</version>
 </dependency>
 ```
 
@@ -798,7 +810,7 @@ mvn org.apache.maven.plugins:maven-deploy-plugin:3.1.4:deploy-file \
   -Dfile=/path/to/comtrade-install/lib/comtrade/java/comtrade-core-java.jar \
   -DgroupId=io.github.blacksnow1 \
   -DartifactId=comtrade-core-java \
-  -Dversion=1.2.0.0 \
+  -Dversion=1.3.0.0 \
   -Dpackaging=jar \
   -DrepositoryId=internal-releases \
   -Durl=https://maven.example.com/repository/maven-releases/
