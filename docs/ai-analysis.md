@@ -244,3 +244,36 @@ CFG 给出非零结束采样号时，默认在该采样范围后隔离不透明�
 （十进制字符串）、retainedBytes、truncated 和 contentsIncluded=false。厂家字节不上传，也不作为测量值。
 full 模式的完整性仅针对 CFG 标准采样区域，允许存在独立尾部；区域内部坏行和残缺记录仍拒绝。
 如果 CFG 数量本身错误，需先核对原文件；核心 C++/Java 可使用 ParseToEnd 策略重新读取。
+
+## OpenSSL 本地优先与 GitHub 源码回退
+
+启用 `COMTRADE_BUILD_AI=ON` 时，先查找本地 OpenSSL >= 3.0 的头文件和库。
+Linux 仅安装运行库而没有开发文件时不算满足依赖。可通过 `OPENSSL_ROOT_DIR` 指定已有安装。
+找不到时默认从 OpenSSL 官方 GitHub Release 下载固定版本 3.5.9，校验 SHA-256，
+在构建目录中配置、编译并安装静态库，不需要 sudo，不修改系统安装。
+JSON、cpp-httplib、libharu 继续使用已有的本地优先策略。
+
+源码回退需要 Perl、C 编译器和 make；Windows MSVC 需要开发者命令环境中的 nmake、原生 Windows Perl，
+MinGW 需要 mingw32-make 和与该环境兼容的 Perl。关闭汇编，不要求 NASM。
+这些是构建工具，不会由项目自动安装。交叉编译请提供目标平台 OpenSSL。
+首次下载和编译发生在 CMake 配置阶段，可能需要数分钟；后续配置复用构建结果。
+步骤日志位于 `_deps/ai_openssl-build/{configure,build,install}.log`。
+
+```bash
+# 指定本地安装
+cmake -S . -B build -DCOMTRADE_BUILD_AI=ON -DOPENSSL_ROOT_DIR=/opt/openssl
+# 离线，不允许 OpenSSL 自动下载
+cmake -S . -B build -DCOMTRADE_BUILD_AI=ON -DCOMTRADE_FETCH_OPENSSL=OFF
+# 用已解压的官方源码回退构建，避免下载 OpenSSL
+cmake -S . -B build -DCOMTRADE_BUILD_AI=ON \
+  -DFETCHCONTENT_SOURCE_DIR_AI_OPENSSL=/absolute/path/to/openssl-3.5.9
+```
+
+`COMTRADE_OPENSSL_JOBS` 默认 2，控制源码构建并发数；
+Unix 的默认证书目录为 `/etc/ssl`，可通过 `COMTRADE_OPENSSL_CONF_DIR` 覆盖；
+AI 配置也支持 `caBundle` 指定可信 CA 文件。
+`COMTRADE_FORCE_FETCH_OPENSSL=ON` 供验证源码回退使用。
+源码回退包附带 OpenSSL 头文件、静态库和许可证；系统 CA 证书仍需存在，必要时配置
+`SSL_CERT_FILE` / `SSL_CERT_DIR` 指向可信证书，不能通过关闭 TLS 验证解决证书错误。
+离线时还应提供 JSON/HTTP/PDF 的本地包或相应 `FETCHCONTENT_SOURCE_DIR_AI_JSON`、
+`FETCHCONTENT_SOURCE_DIR_AI_HTTP`、`FETCHCONTENT_SOURCE_DIR_AI_PDF`。

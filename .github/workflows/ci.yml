@@ -228,3 +228,37 @@ jobs:
       - run: cmake --build build-java --parallel 2
       - name: Run actual JVM integration tests and examples
         run: ctest --test-dir build-java -R 'Java\.' --output-on-failure
+
+  openssl-source-fallback:
+    name: OpenSSL GitHub source fallback
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Install source-build tools
+        run: sudo apt-get update && sudo apt-get install -y perl make g++
+      - name: Force source fallback even when system OpenSSL exists
+        run: >-
+          cmake -S . -B build-openssl -DCMAKE_BUILD_TYPE=Release
+          -DCOMTRADE_BUILD_AI=ON -DCOMTRADE_FORCE_FETCH_OPENSSL=ON
+          -DCOMTRADE_BUILD_TESTS=OFF -DCOMTRADE_BUILD_EXAMPLES=OFF
+          -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/staging-openssl"
+      - name: Reconfigure and reuse project-built OpenSSL without losing install rules
+        run: cmake -S . -B build-openssl -DCOMTRADE_FORCE_FETCH_OPENSSL=OFF
+      - name: Build and install AI with source-built OpenSSL
+        run: |
+          cmake --build build-openssl --parallel 2
+          cmake --install build-openssl
+      - name: Build and test installed consumer using packaged static OpenSSL
+        run: |
+          cmake -S .github/ai-install-test -B openssl-consumer -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${{ github.workspace }}/staging-openssl"
+          cmake --build openssl-consumer --parallel 2
+          ctest --test-dir openssl-consumer --output-on-failure --no-tests=error
+      - name: Upload OpenSSL build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: openssl-source-build-logs
+          path: build-openssl/_deps/ai_openssl-build/*.log

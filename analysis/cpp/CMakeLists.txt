@@ -1,8 +1,9 @@
 cmake_minimum_required(VERSION 3.18)
 include(FetchContent)
 
-find_package(OpenSSL 3.0 REQUIRED)
+include(${PROJECT_SOURCE_DIR}/cmake/ComtradeOpenSSL.cmake)
 find_package(Threads REQUIRED)
+set(COMTRADE_AI_OPENSSL_FETCHED ${COMTRADE_AI_OPENSSL_FETCHED} PARENT_SCOPE)
 
 # Each dependency below is first looked up on the system (a distro package, vcpkg, a manually
 # installed copy, ...); FetchContent only runs as a fallback when nothing suitable is found. This
