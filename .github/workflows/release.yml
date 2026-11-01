@@ -30,13 +30,13 @@ jobs:
           mkdir -p archives
           for path in release-assets/*; do
             name=$(basename "$path")
-            tar -czf "archives/${name}-1.3.0.0.tar.gz" -C "$path" .
+            tar -czf "archives/${name}-1.3.0.1.tar.gz" -C "$path" .
           done
       - name: Publish only after all CI jobs pass
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
-          gh release create v1.3.0.0 archives/*.tar.gz
+          gh release create v1.3.0.1 archives/*.tar.gz
           --target "$GITHUB_SHA"
-          --title "ComtradeCore 1.3.0.0"
-          --notes-file docs/releases/1.3.0.0.md
+          --title "ComtradeCore 1.3.0.1"
+          --notes-file docs/releases/1.3.0.1.md

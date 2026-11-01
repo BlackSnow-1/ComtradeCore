@@ -525,7 +525,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
   -Dfile="$PWD/install/lib/comtrade/java/comtrade-core-java.jar" \
   -DgroupId=io.github.blacksnow1 \
   -DartifactId=comtrade-core-java \
-  -Dversion=1.3.0.0 \
+  -Dversion=1.3.0.1 \
   -Dpackaging=jar \
   -DgeneratePom=true
 ```
@@ -536,7 +536,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
 <dependency>
     <groupId>io.github.blacksnow1</groupId>
     <artifactId>comtrade-core-java</artifactId>
-    <version>1.3.0.0</version>
+    <version>1.3.0.1</version>
 </dependency>
 ```
 
@@ -736,7 +736,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file `
   "-Dfile=D:\testjavaInterface\libs\comtrade-core-java.jar" `
   "-DgroupId=io.github.blacksnow1" `
   "-DartifactId=comtrade-core-java" `
-  "-Dversion=1.3.0.0" `
+  "-Dversion=1.3.0.1" `
   "-Dpackaging=jar" `
   "-DgeneratePom=true"
 ```
@@ -744,7 +744,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file `
 安装位置默认为：
 
 ```text
-%USERPROFILE%\.m2\repository\io\github\blacksnow1\comtrade-core-java\1.3.0.0\
+%USERPROFILE%\.m2\repository\io\github\blacksnow1\comtrade-core-java\1.3.0.1\
 ```
 
 随后在项目的 `pom.xml` 中声明：
@@ -753,7 +753,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file `
 <dependency>
     <groupId>io.github.blacksnow1</groupId>
     <artifactId>comtrade-core-java</artifactId>
-    <version>1.3.0.0</version>
+    <version>1.3.0.1</version>
 </dependency>
 ```
 
@@ -777,7 +777,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
   -Dfile=/path/to/comtrade-install/lib/comtrade/java/comtrade-core-java.jar \
   -DgroupId=io.github.blacksnow1 \
   -DartifactId=comtrade-core-java \
-  -Dversion=1.3.0.0 \
+  -Dversion=1.3.0.1 \
   -Dpackaging=jar \
   -DgeneratePom=true
 ```
@@ -788,7 +788,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
 <dependency>
     <groupId>io.github.blacksnow1</groupId>
     <artifactId>comtrade-core-java</artifactId>
-    <version>1.3.0.0</version>
+    <version>1.3.0.1</version>
 </dependency>
 ```
 
@@ -814,7 +814,7 @@ mvn org.apache.maven.plugins:maven-deploy-plugin:3.1.4:deploy-file \
   -Dfile=/path/to/comtrade-install/lib/comtrade/java/comtrade-core-java.jar \
   -DgroupId=io.github.blacksnow1 \
   -DartifactId=comtrade-core-java \
-  -Dversion=1.3.0.0 \
+  -Dversion=1.3.0.1 \
   -Dpackaging=jar \
   -DrepositoryId=internal-releases \
   -Durl=https://maven.example.com/repository/maven-releases/

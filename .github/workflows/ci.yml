@@ -218,7 +218,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ai: ['OFF', 'ON']
+        include:
+          - {ai: 'OFF', artifact: ComtradeCore-java-linux}
+          - {ai: 'ON', artifact: ComtradeCore-java-ai-linux}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -248,6 +250,12 @@ jobs:
       - run: cmake --build java-installed-consumer
       - name: Run installed Java core or AI HTTP/PDF consumer
         run: ctest --test-dir java-installed-consumer --output-on-failure --no-tests=error --output-junit java-install-results.xml
+      - name: Upload tested Java installation
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: staging-java
+          if-no-files-found: error
       - uses: actions/upload-artifact@v7
         if: always()
         with:
