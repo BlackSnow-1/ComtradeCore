@@ -1,5 +1,7 @@
 # ComtradeCore
 
+需要检查录波文件时，可使用 [IEEE COMTRADE 格式检查工具](tools/README.md) 单独检查 CFG 或交叉检查 CFG/DAT。读取时的警告和 C++ API 见 [字段校验与容错](docs/validation.md)。
+
 [![CI](https://github.com/BlackSnow-1/ComtradeCore/actions/workflows/ci.yml/badge.svg)](https://github.com/BlackSnow-1/ComtradeCore/actions/workflows/ci.yml)
 [![C++17](https://img.shields.io/badge/C%2B%2B-17-00599C?logo=cplusplus&logoColor=white)](#环境要求)
 [![CMake 3.14+](https://img.shields.io/badge/CMake-3.14%2B-064F8C?logo=cmake&logoColor=white)](#安装与集成)
@@ -352,8 +354,8 @@ target_include_directories(your_app PRIVATE /path/to/ComtradeCore/include)
 
 ## Java 绑定
 
-Release 同时提供普通版 `comtrade-core-java-1.3.0.1.jar` 和带 AI 的
-`comtrade-core-java-ai-1.3.0.1.jar`，二选一使用；JAR 仍需配套匹配系统的 JNI 本地库，
+Release 同时提供普通版 `comtrade-core-java-1.3.0.2.jar` 和带 AI 的
+`comtrade-core-java-ai-1.3.0.2.jar`，二选一使用；JAR 仍需配套匹配系统的 JNI 本地库，
 Linux 用户可下载同一 Release 对应的 Java 安装包。
 
 Java 安装组件可用 `cmake --install <build> --component Java --prefix <prefix>` 单独安装。
@@ -529,7 +531,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
   -Dfile="$PWD/install/lib/comtrade/java/comtrade-core-java.jar" \
   -DgroupId=io.github.blacksnow1 \
   -DartifactId=comtrade-core-java \
-  -Dversion=1.3.0.1 \
+  -Dversion=1.3.0.2 \
   -Dpackaging=jar \
   -DgeneratePom=true
 ```
@@ -540,7 +542,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
 <dependency>
     <groupId>io.github.blacksnow1</groupId>
     <artifactId>comtrade-core-java</artifactId>
-    <version>1.3.0.1</version>
+    <version>1.3.0.2</version>
 </dependency>
 ```
 
@@ -740,7 +742,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file `
   "-Dfile=D:\testjavaInterface\libs\comtrade-core-java.jar" `
   "-DgroupId=io.github.blacksnow1" `
   "-DartifactId=comtrade-core-java" `
-  "-Dversion=1.3.0.1" `
+  "-Dversion=1.3.0.2" `
   "-Dpackaging=jar" `
   "-DgeneratePom=true"
 ```
@@ -748,7 +750,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file `
 安装位置默认为：
 
 ```text
-%USERPROFILE%\.m2\repository\io\github\blacksnow1\comtrade-core-java\1.3.0.1\
+%USERPROFILE%\.m2\repository\io\github\blacksnow1\comtrade-core-java\1.3.0.2\
 ```
 
 随后在项目的 `pom.xml` 中声明：
@@ -757,7 +759,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file `
 <dependency>
     <groupId>io.github.blacksnow1</groupId>
     <artifactId>comtrade-core-java</artifactId>
-    <version>1.3.0.1</version>
+    <version>1.3.0.2</version>
 </dependency>
 ```
 
@@ -781,7 +783,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
   -Dfile=/path/to/comtrade-install/lib/comtrade/java/comtrade-core-java.jar \
   -DgroupId=io.github.blacksnow1 \
   -DartifactId=comtrade-core-java \
-  -Dversion=1.3.0.1 \
+  -Dversion=1.3.0.2 \
   -Dpackaging=jar \
   -DgeneratePom=true
 ```
@@ -792,7 +794,7 @@ mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
 <dependency>
     <groupId>io.github.blacksnow1</groupId>
     <artifactId>comtrade-core-java</artifactId>
-    <version>1.3.0.1</version>
+    <version>1.3.0.2</version>
 </dependency>
 ```
 
@@ -818,7 +820,7 @@ mvn org.apache.maven.plugins:maven-deploy-plugin:3.1.4:deploy-file \
   -Dfile=/path/to/comtrade-install/lib/comtrade/java/comtrade-core-java.jar \
   -DgroupId=io.github.blacksnow1 \
   -DartifactId=comtrade-core-java \
-  -Dversion=1.3.0.1 \
+  -Dversion=1.3.0.2 \
   -Dpackaging=jar \
   -DrepositoryId=internal-releases \
   -Durl=https://maven.example.com/repository/maven-releases/

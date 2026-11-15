@@ -9,4 +9,5 @@
 // 字符串/时间工具和记录对象。流式读写器仍可按需单独包含，以减少无关依赖。
 #include "types.hpp"
 #include "utils.hpp"
+#include "format_validation.hpp"
 #include "record.hpp"  // 引入统一的 Record 对象

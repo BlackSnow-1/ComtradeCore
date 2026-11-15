@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(ComtradeCore VERSION 1.3.0.1 LANGUAGES CXX)
+project(ComtradeCore VERSION 1.3.0.2 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -40,6 +40,7 @@ endif()
 # ==========================================
 # 2. 构建选项配置
 # ==========================================
+option(COMTRADE_BUILD_TOOLS "Build the COMTRADE format checker" ${COMTRADE_IS_TOP_LEVEL})
 option(COMTRADE_BUILD_TESTS "Build ComtradeCore unit tests" ${COMTRADE_IS_TOP_LEVEL})
 option(COMTRADE_BUILD_EXAMPLES "Build ComtradeCore examples" ${COMTRADE_IS_TOP_LEVEL})
 option(COMTRADE_BUILD_BENCHMARKS "Build ComtradeCore benchmarks" OFF)
@@ -58,6 +59,10 @@ option(COMTRADE_INSTALL_AI "Install the optional AI module (headers, CLI, licens
 # comtrade::ComtradeAI，该 target 由 analysis/cpp 定义。
 if(COMTRADE_BUILD_AI)
     add_subdirectory(analysis/cpp)
+endif()
+
+if(COMTRADE_BUILD_TOOLS)
+    add_subdirectory(tools)
 endif()
 
 if(COMTRADE_BUILD_TESTS)

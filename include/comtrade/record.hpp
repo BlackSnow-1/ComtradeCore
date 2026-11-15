@@ -42,17 +42,26 @@ namespace comtrade {
         // ==========================================
         inline bool parseCfg(const std::string &cfg_filepath) {
             CfgData parsed_cfg;
-            if (!detail::parseCfgFile(cfg_filepath, parsed_cfg)) return false;
+            if (!detail::parseCfgFile(cfg_filepath, parsed_cfg, &warnings_)) {
+                addWarning(warnings_, "cfg.read", "Cannot open or parse CFG");
+                if (options_.warning_logger)
+                    for (const auto& warning : warnings_) options_.warning_logger(cfg_filepath, warning);
+                return false;
+            }
             cfg_ = std::move(parsed_cfg);
             warnings_ = cfg_.warnings;
+            if (options_.warning_logger)
+                for (const auto& warning : warnings_) options_.warning_logger(cfg_filepath, warning);
             return true;
         }
 
         inline bool parseDat(const std::string &dat_filepath) {
             StreamReader reader(cfg_, options_);
-            std::ifstream input(dat_filepath, std::ios::binary);
-            if (!input) return false;
-            return readSamples(reader, [&](const auto& callback) { return reader.processStream(input, callback); });
+            return readSamples(reader, [&](const auto& callback) {
+                reader.processDatStream(dat_filepath, callback);
+                return std::none_of(reader.getWarnings().begin(), reader.getWarnings().end(),
+                    [](const auto& warning) { return warning.code == "dat.open"; });
+            });
         }
         const DatTail& getDatTail() const noexcept { return dat_tail_; }
         bool saveDatTail(const std::string& path) const {
@@ -74,7 +83,10 @@ namespace comtrade {
                 if (!reader.isCff()) return false;
                 Record loaded; loaded.cfg_ = reader.getCfg(); loaded.options_ = options_;
                 loaded.header_ = reader.getHeader(); loaded.information_ = reader.getInformation();
-                if (!loaded.readSamples(reader, [&](const auto& callback) { return reader.processCffStream(callback); })) return false;
+                if (!loaded.readSamples(reader, [&](const auto& callback) { reader.processCffStream(callback); return true; })) {
+                    warnings_ = loaded.getWarnings();
+                    return false;
+                }
                 *this = std::move(loaded); return true;
             } catch (const std::exception&) { return false; }
         }
@@ -295,13 +307,14 @@ namespace comtrade {
             RecordData decoded;
             decoded.analog_values.resize(cfg_.analog_count); decoded.digital_values.resize(cfg_.digital_count);
             try {
-                process([&](const SampleRow& row) {
+                const bool read = process([&](const SampleRow& row) {
                     decoded.timestamp.push_back(row.timestamp_us);
                     decoded.time_offset_ns.push_back(row.time_offset.count());
                     for (size_t i=0;i<row.analog_values.size();++i) decoded.analog_values[i].push_back(row.analog_values[i]);
                     for (size_t i=0;i<row.digital_values.size();++i) decoded.digital_values[i].push_back(row.digital_values[i]);
                 });
-            } catch (const std::exception&) { return false; }
+                if (!read) { warnings_ = reader.getWarnings(); return false; }
+            } catch (const std::exception&) { warnings_ = reader.getWarnings(); return false; }
             data_ = std::move(decoded); dat_tail_ = reader.getDatTail(); warnings_ = reader.getWarnings(); return true;
         }
         ReadOptions options_;

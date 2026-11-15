@@ -36,6 +36,7 @@
 
 # Executables
 *.exe
+!/tools/comtrade-check-windows-x86_64.exe
 *.out
 *.app
 

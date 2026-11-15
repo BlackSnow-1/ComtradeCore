@@ -138,7 +138,7 @@ namespace {
 
         EXPECT_EQ(readTextFile(dat_path_),
                   "1,100,22,-4,1,0,1\r\n"
-                  "2,250,0,2,0,1,0\r\n");
+                  "2,250,0,2,0,1,0\r\n\x1a");
     }
 
     TEST_F(StreamEngineTest, WritesBinaryRowsUsingInt16AnalogsAndPackedDigitalWords) {

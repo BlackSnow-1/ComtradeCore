@@ -54,12 +54,21 @@ public:
         if (first.find("---") != std::string::npos) {
             input.clear(); input.seekg(0);
             detail::CffSections cff;
-            if (!detail::readCff(input, cff)) throw std::runtime_error("Invalid CFF: " + path);
+            if (!detail::readCff(input, cff)) {
+                addWarning(warnings_, "cff.read", "Cannot parse CFF sections");
+                logWarnings(path, 0);
+                throw std::runtime_error("Invalid CFF: " + path);
+            }
             cfg_ = std::move(cff.cfg); hdr_ = std::move(cff.hdr); inf_ = std::move(cff.inf);
             cff_path_ = path; cff_offset_ = cff.dat_offset;
             cff_bytes_ = cff.dat_bytes; cff_bounded_ = cff.has_byte_count;
-        } else if (!detail::parseCfgFile(path, cfg_)) throw std::runtime_error("Invalid CFG: " + path);
+        } else if (!detail::parseCfgFile(path, cfg_, &warnings_)) {
+            addWarning(warnings_, "cfg.read", "Cannot open or parse CFG");
+            logWarnings(path, 0);
+            throw std::runtime_error("Invalid CFG: " + path);
+        }
         warnings_ = cfg_.warnings;
+        logWarnings(path, 0);
     }
     explicit StreamReader(CfgData cfg, ReadOptions options = {}) : cfg_(std::move(cfg)), options_(options), warnings_(cfg_.warnings) {}
     const DatTail& getDatTail() const noexcept { return dat_tail_; }
@@ -78,13 +87,19 @@ public:
     size_t processCffStream(const std::function<void(const SampleRow&)>& callback) const {
         if (!isCff()) throw std::logic_error("Reader was not opened from CFF");
         std::ifstream input(cff_path_, std::ios::binary);
-        if (!input) throw std::runtime_error("Cannot open CFF");
+        if (!input) {
+            warnings_ = cfg_.warnings;
+            addWarning(warnings_, "cff.open", "Cannot reopen CFF");
+            logWarnings(cff_path_, cfg_.warnings.size());
+            throw std::runtime_error("Cannot open CFF");
+        }
         input.seekg(0, std::ios::end);
         const auto available = static_cast<uint64_t>(input.tellg() - cff_offset_);
         input.seekg(cff_offset_);
-        auto count = processStream(input, callback, cff_bounded_ ? std::min(available, cff_bytes_) : available);
+        auto count = decodeStream(input, callback, cff_bounded_ ? std::min(available, cff_bytes_) : available);
         if (cff_bounded_ && available != cff_bytes_)
             addWarning(warnings_, "cff.byte_count", "Declared CFF DAT byte count differs from available bytes");
+        logWarnings(cff_path_, cfg_.warnings.size());
         return count;
     }
 
@@ -95,11 +110,29 @@ public:
     size_t processDatStream(const std::string& dat_filepath,
                             const std::function<void(const SampleRow&)>& on_row_parsed) const {
         std::ifstream input(dat_filepath, std::ios::binary);
-        if (!input) { dat_tail_ = {}; physical_rows_ = 0; warnings_ = cfg_.warnings; addWarning(warnings_, "dat.open", "Cannot open DAT"); return 0; }
-        return processStream(input, on_row_parsed);
+        size_t count = 0;
+        if (!input) {
+            dat_tail_ = {}; physical_rows_ = 0; warnings_ = cfg_.warnings;
+            addWarning(warnings_, "dat.open", "Cannot open DAT");
+        } else count = decodeStream(input, on_row_parsed, std::numeric_limits<uint64_t>::max());
+        logWarnings(dat_filepath, cfg_.warnings.size());
+        return count;
     }
     size_t processStream(std::istream& input, const std::function<void(const SampleRow&)>& callback,
                          uint64_t byte_limit = std::numeric_limits<uint64_t>::max()) const {
+        const auto count = decodeStream(input, callback, byte_limit);
+        logWarnings("DAT stream", cfg_.warnings.size());
+        return count;
+    }
+
+private:
+    void logWarnings(const std::string& source, size_t first) const {
+        if (options_.warning_logger)
+            for (; first < warnings_.size(); ++first) options_.warning_logger(source, warnings_[first]);
+    }
+
+    size_t decodeStream(std::istream& input, const std::function<void(const SampleRow&)>& callback,
+                        uint64_t byte_limit) const {
         warnings_ = cfg_.warnings; physical_rows_ = 0; dat_tail_ = {};
         if (!std::isfinite(cfg_.time_multiplier) || cfg_.time_multiplier <= 0 ||
             cfg_.analog_count < 0 || cfg_.digital_count < 0 ||
@@ -115,15 +148,29 @@ public:
             if (value.time_offset.count() <= previous_time) addWarning(warnings_, "dat.time_order", "Non-increasing sample time", value.index);
             previous_index = value.index; previous_time = value.time_offset.count(); callback(value);
         };
-        const auto count = cfg_.data_type == DataType::ASCII ? processAsciiDat(input, row, checked, byte_limit)
-                         : processBinaryDat(input, row, checked, byte_limit);
+        detail::IeeeCfgLayout layout;
+        layout.version = cfg_.version;
+        layout.type = cfg_.data_type;
+        layout.analog = cfg_.analog_count;
+        layout.digital = cfg_.digital_count;
+        layout.timestamp_required = cfg_.version == StandardVersion::V1991 || cfg_.variable_sample_rate;
+        if (!cfg_.sample_rates.empty()) layout.samples = cfg_.sample_rates.back().end_sample;
+        for (const auto& c : cfg_.analog_channels) layout.ranges.emplace_back(c.min, c.max);
+        detail::DatFormatCheck check(layout, warnings_);
+        bool eof_marker = false;
+        const auto count = cfg_.data_type == DataType::ASCII
+            ? processAsciiDat(input, row, checked, byte_limit, check, eof_marker)
+            : processBinaryDat(input, row, checked, byte_limit, check);
+        check.finish(physical_rows_, eof_marker);
+        if (cfg_.data_type != DataType::ASCII && dat_tail_.byte_count)
+            addWarning(warnings_, "ieee.dat.trailing_bytes", "Found " + std::to_string(dat_tail_.byte_count) +
+                       " bytes beyond the CFG sample boundary", physical_rows_+1);
         if (!cfg_.sample_rates.empty() && count != cfg_.sample_rates.back().end_sample)
             addWarning(warnings_, "dat.sample_count", "Parsed sample count differs from CFG");
         if (input.bad()) addWarning(warnings_, "dat.io", "I/O error while reading DAT");
         return count;
     }
 
-private:
     uint64_t declaredSampleEnd() const noexcept {
         if (options_.dat_tail_policy == DatTailPolicy::ParseToEnd || cfg_.sample_rates.empty()) return 0;
         return cfg_.sample_rates.back().end_sample;
@@ -199,7 +246,9 @@ private:
     }
     double decodeAnalog(double raw, size_t channel, SampleRow& row) const {
         const bool missing = !std::isfinite(raw) ||
-            (cfg_.data_type == DataType::ASCII && cfg_.version != StandardVersion::V1991 && raw == 99999) ||
+            (cfg_.data_type == DataType::ASCII &&
+             ((cfg_.version == StandardVersion::V1999 && raw == 99999) ||
+              (cfg_.version == StandardVersion::V1991 && raw == 999999))) ||
             (cfg_.data_type == DataType::BINARY && raw == (cfg_.version == StandardVersion::V1991 ? -1 : -32768)) ||
             (cfg_.data_type == DataType::BINARY32 && raw == -2147483648.0) ||
             (cfg_.data_type == DataType::FLOAT32 && raw == -static_cast<double>(std::numeric_limits<float>::max()));
@@ -213,7 +262,8 @@ private:
 
     size_t processAsciiDat(std::istream& dat_file,
                            SampleRow& row_buffer,
-                           const std::function<void(const SampleRow&)>& on_row_parsed, uint64_t byte_limit) const {
+                           const std::function<void(const SampleRow&)>& on_row_parsed, uint64_t byte_limit,
+                           detail::DatFormatCheck& check, bool& eof_marker) const {
         size_t parsed_count = 0;
         std::size_t segment_cursor = 0;
         std::string line;
@@ -221,13 +271,19 @@ private:
         uint64_t physical_row = 0, consumed = 0;
         while (consumed < byte_limit && std::getline(dat_file, line)) {
             consumed += line.size() + (dat_file.eof() ? 0 : 1);
+            if (consumed > byte_limit) { addWarning(warnings_, "dat.partial_row", "CFF limit cuts an ASCII row", physical_row+1); break; }
+            if (line == "\x1a" && dat_file.eof()) {
+                eof_marker = true;
+                break;
+            }
             ++physical_row; physical_rows_ = physical_row;
-            if (consumed > byte_limit) { addWarning(warnings_, "dat.partial_row", "CFF limit cuts an ASCII row", physical_row); break; }
+            detail::checkTextLine(warnings_, "ieee.dat.crlf", "ieee.dat.ascii", line, !dat_file.eof(), physical_row);
             if (first_line) {
                 detail::stripUtf8Bom(line);
                 first_line = false;
             }
             const auto tokens = utils::split(line);
+            check.asciiFields(tokens, physical_row);
             const auto expected_tokens = static_cast<std::size_t>(2 + cfg_.analog_count + cfg_.digital_count);
             if (tokens.size() < expected_tokens) { addWarning(warnings_, "dat.bad_row", "Short DAT row skipped", physical_row); continue; }
             if (tokens.size() > expected_tokens) addWarning(warnings_, "dat.extra_columns", "Extra DAT columns ignored", physical_row);
@@ -271,6 +327,11 @@ private:
             on_row_parsed(row_buffer);
             ++parsed_count;
             if (declaredSampleEnd() && row_buffer.index == declaredSampleEnd()) {
+                if (consumed < byte_limit && dat_file.peek() == 0x1a) {
+                    dat_file.get();
+                    ++consumed;
+                    eof_marker = true;
+                }
                 readDatTail(dat_file, consumed, byte_limit);
                 break;
             }
@@ -281,7 +342,8 @@ private:
 
     size_t processBinaryDat(std::istream& dat_file,
                             SampleRow& row_buffer,
-                            const std::function<void(const SampleRow&)>& on_row_parsed, uint64_t byte_limit) const {
+                            const std::function<void(const SampleRow&)>& on_row_parsed, uint64_t byte_limit,
+                            detail::DatFormatCheck& check) const {
         const auto analog_count = static_cast<std::size_t>(cfg_.analog_count);
         const auto digital_count = static_cast<std::size_t>(cfg_.digital_count);
         const auto row_size = detail::binaryRowSize(cfg_.data_type, analog_count, digital_count);
@@ -292,6 +354,7 @@ private:
         uint64_t consumed = 0;
         while (byte_limit - consumed >= row_size && dat_file.read(encoded_row.data(), static_cast<std::streamsize>(encoded_row.size()))) {
             consumed += row_size; ++physical_rows_;
+            check.binary(encoded_row.data(), physical_rows_);
             const char* cursor = encoded_row.data();
             row_buffer.index = detail::readUint32LittleEndian(cursor);
             row_buffer.raw_timestamp = detail::readUint32LittleEndian(cursor);

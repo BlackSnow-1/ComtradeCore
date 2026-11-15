@@ -12,6 +12,9 @@
 #include <cstdint>
 #include <algorithm>
 #include <stdexcept>
+#include <functional>
+#include <iostream>
+#include <sstream>
 
 namespace comtrade {
     // Aggregated by code: repeated bad rows do not grow memory without bound.
@@ -25,12 +28,22 @@ namespace comtrade {
         for (auto& warning : warnings) if (warning.code == code) { ++warning.count; return; }
         warnings.push_back({code, message, row, 1});
     }
+    // Called once per aggregated diagnostic at the end of a read.
+    using WarningLogger = std::function<void(const std::string&, const Warning&)>;
+    inline void logWarning(const std::string& source, const Warning& warning) {
+        std::ostringstream line;
+        line << "WARN " << source;
+        if (warning.first_row) line << ':' << warning.first_row;
+        line << " [" << warning.code << "] " << warning.message << " (count=" << warning.count << ")\n";
+        std::clog << line.str();
+    }
     enum class TimeAxisMode { Automatic, DatTimestamps, SampleRates };
     enum class DatTailPolicy { AfterCfgSamples, ParseToEnd };
     struct ReadOptions {
         TimeAxisMode time_axis = TimeAxisMode::Automatic;
         DatTailPolicy dat_tail_policy = DatTailPolicy::AfterCfgSamples;
         size_t max_retained_tail_bytes = 1024 * 1024;
+        WarningLogger warning_logger = logWarning;
     };
     // Offset is relative to the DAT payload, including when embedded in a CFF.
     // Bytes are opaque: they may contain NULs, checksums, or a vendor-specific encoding.

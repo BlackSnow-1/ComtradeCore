@@ -5,6 +5,7 @@
 #pragma once
 
 #include "text_encoding.hpp"
+#include "format_checks.hpp"
 #include "types.hpp"
 #include "utils.hpp"
 
@@ -119,7 +120,7 @@ inline bool parseCfgLines(const std::vector<std::string>& lines, CfgData& cfg) {
         addWarning(parsed_cfg.warnings, "cfg.channel_count", "Total channel count corrected from A/D counts", 2);
         parsed_cfg.total_channels = parsed_cfg.analog_count + parsed_cfg.digital_count;
     }
-    if (identity.size() > 2 && identity[2] != "1991" && identity[2] != "1999" && identity[2] != "2013")
+    if (identity.size() > 2 && !identity[2].empty() && identity[2] != "1991" && identity[2] != "1999" && identity[2] != "2013")
         addWarning(parsed_cfg.warnings, "cfg.version", "Unknown revision interpreted using legacy layout", 1);
 
     // CFG 的后续字段依赖前面声明的通道数，因此使用游标严格顺序消费各行。
@@ -162,7 +163,9 @@ inline bool parseCfgLines(const std::vector<std::string>& lines, CfgData& cfg) {
         channel.id = tokens[1];
         if (tokens.size() > 2) channel.phase = tokens[2];
         if (tokens.size() > 3) channel.ccbm = tokens[3];
-        optionalNumber(tokens, 4, channel.normal_state, parsed_cfg.warnings, cursor+1);
+        const bool legacy_row = parsed_cfg.version == StandardVersion::V1991 && tokens.size() == 3;
+        if (legacy_row) channel.phase.clear();
+        optionalNumber(tokens, legacy_row ? 2 : 4, channel.normal_state, parsed_cfg.warnings, cursor+1);
         parsed_cfg.digital_channels.push_back(std::move(channel));
     }
 
@@ -280,11 +283,21 @@ inline bool parseCfgLines(const std::vector<std::string>& lines, CfgData& cfg) {
     if (!parsed_cfg.utc_offset_known)
         addWarning(parsed_cfg.warnings, "cfg.timezone_unknown", "UTC offset unavailable; legacy machine-local interpretation retained");
     // Dates cannot be fabricated: unlike optional metadata, an invalid date is fatal.
-    parsed_cfg.start_time = utils::parseTime(start_time_text, parsed_cfg.utc_offset_known, parsed_cfg.utc_offset_minutes);
-    parsed_cfg.trigger_time = utils::parseTime(trigger_time_text, parsed_cfg.utc_offset_known, parsed_cfg.utc_offset_minutes);
+    auto parseDateTime = [&](const std::string& text) {
+        if (parsed_cfg.version == StandardVersion::V1991) {
+            static const std::regex legacy_date(R"(^([0-9]{1,2})/([0-9]{1,2})/([0-9]{2}),([^\r]*)(?:\r)?$)");
+            std::smatch parts;
+            if (std::regex_match(text, parts, legacy_date))
+                return utils::parseTime(parts[2].str() + "/" + parts[1].str() + "/19" + parts[3].str() + "," + parts[4].str());
+        }
+        return utils::parseTime(text, parsed_cfg.utc_offset_known, parsed_cfg.utc_offset_minutes);
+    };
+    parsed_cfg.start_time = parseDateTime(start_time_text);
+    parsed_cfg.trigger_time = parseDateTime(trigger_time_text);
     uint32_t previous_end = 0;
     for (const auto& rate : parsed_cfg.sample_rates) {
-        if (rate.end_sample <= previous_end || rate.samples_per_second <= 0)
+        if (rate.end_sample <= previous_end ||
+            (rate.samples_per_second <= 0 && !parsed_cfg.variable_sample_rate))
             addWarning(parsed_cfg.warnings, "cfg.sample_rates", "Non-positive rate or non-increasing segment boundary; reconstruction may be unavailable");
         previous_end = rate.end_sample;
     }
@@ -308,21 +321,29 @@ inline bool parseCfgLines(const std::vector<std::string>& lines, CfgData& cfg) {
 }
 
 // 文件层只负责读取与编码规范化；格式异常统一转换为 false，避免数值转换异常泄漏到调用方。
-inline bool parseCfgFile(const std::string& cfg_filepath, CfgData& cfg) {
-    std::ifstream cfg_file(cfg_filepath);
+inline bool parseCfgFile(const std::string& cfg_filepath, CfgData& cfg, Warnings* failure = nullptr) {
+    if (failure) failure->clear();
+    std::ifstream cfg_file(cfg_filepath, std::ios::binary);
     if (!cfg_file.is_open()) return false;
 
     std::vector<std::string> lines;
     std::string line;
+    Warnings format;
     while (std::getline(cfg_file, line)) {
+        checkTextLine(format, "ieee.cfg.crlf", "ieee.cfg.ascii", line, !cfg_file.eof(), lines.size()+1);
         lines.push_back(std::move(line));
     }
+    checkCfgLayout(lines, format);
+    if (failure) *failure = format;
+    if (cfg_file.bad()) return false;
 
     // 解析前统一为 UTF-8，使站名和通道名在 Linux/Windows 上具有一致语义。
     normalizeCfgLinesToUtf8(lines);
 
     try {
-        return parseCfgLines(lines, cfg);
+        if (!parseCfgLines(lines, cfg)) return false;
+        cfg.warnings.insert(cfg.warnings.end(), format.begin(), format.end());
+        return true;
     } catch (const std::exception&) {
         return false;
     }

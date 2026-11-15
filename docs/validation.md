@@ -1,5 +1,26 @@
 # 字段校验与容错
 
+## IEEE 格式检查
+
+[格式检查工具](../tools/README.md)支持单独检查 CFG，也可逐行或逐记录交叉检查完整 DAT。C++ 可调用 `comtrade::checkFormat(cfgStream, &datStream)`，传入以二进制模式打开的输入流。省略第二个参数时只检查 CFG。`FormatReport` 返回预期与实际采样数、I/O 状态和诊断列表。
+
+`Record` 和 `StreamReader` 读取 CFG/DAT 时自动检查文件换行、通道编号和列数、采样序列、数值及其他 IEEE 字段。CFF 的内嵌 CFG 和 DAT 也走这些检查。默认向 `std::clog` 输出文件名、首次问题位置、代码和累计次数。C++ 调用方可在读取前设置 `ReadOptions::warning_logger`，将诊断接入应用日志。将其设为 `{}` 可关闭日志输出，并通过 `getWarnings()` 查询诊断。Java 绑定通过本地日志输出警告，仍可用 `warnings()` 查询。
+
+```cpp
+comtrade::Record record;
+comtrade::ReadOptions opts;
+opts.warning_logger = [](const std::string& source, const comtrade::Warning& warning) {
+    comtrade::logWarning(source, warning);
+};
+record.setReadOptions(opts);
+if (record.parseCfg("event.cfg")) record.parseDat("event.dat");
+```
+
+默认容错读取会在 CFG 的采样边界保留厂商附加字节。要逐记录排查边界后的内容，可用独立工具或指定 `DatTailPolicy::ParseToEnd`。标准 ASCII EOF 标记（0x1A）在读取时识别，1991 和 2013 版写入器在关闭时生成该标记。
+
+## 读取时的修复与告警
+
+
 核心 CFG/DAT 解析遵循“可以可靠恢复则继续并警告；不能可靠解码则失败或跳过坏行”。
 Record 和 StreamReader 共用解析器，CFF 内嵌 CFG 也遵循相同规则。
 

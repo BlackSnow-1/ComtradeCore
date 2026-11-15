@@ -29,9 +29,11 @@ inline bool readCff(std::istream& input, CffSections& result) {
             if (section == "CFG") { if (have_cfg) return false; have_cfg = true; }
             if (section == "DAT") {
                 if (!have_cfg || lines.empty()) return false;
+                checkCfgLayout(lines, warnings);
                 normalizeCfgLinesToUtf8(lines);
                 try {
                     if (!parseCfgLines(lines, parsed.cfg)) return false;
+                    parsed.cfg.warnings.insert(parsed.cfg.warnings.end(), warnings.begin(), warnings.end());
                     if (match[2].matched) {
                         auto encoding = DataTypeUtils::FromString(match[2]);
                         // DAT BINARY denotes all binary layouts; CFG selects the analog width.
@@ -49,7 +51,10 @@ inline bool readCff(std::istream& input, CffSections& result) {
             }
             continue;
         }
-        if (section == "CFG") lines.push_back(line);
+        if (section == "CFG") {
+            checkTextLine(warnings, "ieee.cfg.crlf", "ieee.cfg.ascii", line, !input.eof(), lines.size()+1);
+            lines.push_back(line);
+        }
         else if (section == "HDR") parsed.hdr += line + "\n";
         else if (section == "INF") parsed.inf += line + "\n";
         else if (!line.empty()) return false;

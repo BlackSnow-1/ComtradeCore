@@ -30,15 +30,19 @@ jobs:
           mkdir -p archives
           for path in release-assets/*; do
             name=$(basename "$path")
-            tar -czf "archives/${name}-1.3.0.1.tar.gz" -C "$path" .
+            tar -czf "archives/${name}-1.3.0.2.tar.gz" -C "$path" .
           done
-          cp release-assets/ComtradeCore-java-linux/lib/comtrade/java/comtrade-core-java.jar archives/comtrade-core-java-1.3.0.1.jar
-          cp release-assets/ComtradeCore-java-ai-linux/lib/comtrade/java/comtrade-core-java.jar archives/comtrade-core-java-ai-1.3.0.1.jar
+          cp release-assets/ComtradeCore-java-linux/lib/comtrade/java/comtrade-core-java.jar archives/comtrade-core-java-1.3.0.2.jar
+          cp release-assets/ComtradeCore-java-ai-linux/lib/comtrade/java/comtrade-core-java.jar archives/comtrade-core-java-ai-1.3.0.2.jar
+          cp release-assets/ComtradeCore-windows-msvc/bin/comtrade-check.exe archives/comtrade-check-windows-x86_64.exe
+          mkdir -p checker
+          install -m 0755 release-assets/ComtradeCore-linux-gcc/bin/comtrade-check checker/comtrade-check
+          tar -czf archives/comtrade-check-linux-x86_64.tar.gz -C checker comtrade-check
       - name: Publish only after all CI jobs pass
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
-          gh release create v1.3.0.1 archives/*.tar.gz archives/*.jar
-          --target "$GITHUB_SHA"
-          --title "ComtradeCore 1.3.0.1"
-          --notes-file docs/releases/1.3.0.1.md
+          gh release create v1.3.0.2 archives/*.tar.gz archives/*.jar archives/*.exe
+          --target "$GITHUB_SHA" --latest
+          --title "ComtradeCore 1.3.0.2"
+          --notes-file docs/releases/1.3.0.2.md

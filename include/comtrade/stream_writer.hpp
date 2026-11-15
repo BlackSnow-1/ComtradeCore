@@ -31,7 +31,7 @@ namespace comtrade {
         }
 
         ~StreamWriter() {
-            close();
+            try { close(); } catch (...) {}
         }
 
         bool open(const std::string &dat_filepath) {
@@ -54,8 +54,9 @@ namespace comtrade {
             }
 
             owned_file_.open(dat_filepath, mode);
+            if (!owned_file_.is_open()) return false;
             output_ = &owned_file_;
-            return owned_file_.is_open();
+            return true;
         }
 
         void open(std::ostream& output) {
@@ -103,8 +104,11 @@ namespace comtrade {
         }
 
         void close() {
+            auto* output = std::exchange(output_, nullptr);
+            if (output && cfg_.version != StandardVersion::V1999 && cfg_.data_type == DataType::ASCII &&
+                current_row_index_ != 1 && *output)
+                output->put('\x1a');
             if (owned_file_.is_open()) { owned_file_.flush(); owned_file_.close(); }
-            output_ = nullptr;
         }
 
     private:
@@ -115,10 +119,12 @@ namespace comtrade {
                 // 工程值写回原始整数：raw = round((value - b) / a)。
                 stream() << ",";
                 if (std::isnan(a_vals[i])) {
-                    if (cfg_.version != StandardVersion::V1991) stream() << "99999";
+                    if (cfg_.version == StandardVersion::V1991) stream() << "999999";
+                    if (cfg_.version == StandardVersion::V1999) stream() << "99999";
                 } else {
                     const auto raw = checkedIntegralAnalog<std::int32_t>(a_vals[i], ch);
-                    if (cfg_.version != StandardVersion::V1991 && raw == 99999)
+                    if ((cfg_.version == StandardVersion::V1999 && raw == 99999) ||
+                        (cfg_.version == StandardVersion::V1991 && raw == 999999))
                         throw std::invalid_argument("Analog value collides with missing-data marker");
                     stream() << raw;
                 }

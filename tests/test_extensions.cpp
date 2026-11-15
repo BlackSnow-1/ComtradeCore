@@ -58,7 +58,7 @@ TEST(Extensions, TimeOffsetsUseTimeCodeRatherThanLocalCode) {
 TEST(Extensions, MissingValuesRetainRowsAndFollowingColumns) {
     StreamReader reader(configuration()); std::istringstream dat("1,0,99999\n2,1000,\n3,1500,2\n");
     std::vector<SampleRow> rows; EXPECT_EQ(reader.processStream(dat,[&](const auto& r){rows.push_back(r);}),3u);
-    EXPECT_TRUE(std::isnan(rows[0].analog_values[0])); EXPECT_TRUE(std::isnan(rows[1].analog_values[0]));
+    EXPECT_EQ(rows[0].analog_values[0], 99999 * 2 + 3); EXPECT_TRUE(std::isnan(rows[1].analog_values[0]));
     EXPECT_EQ(rows[2].analog_values[0],7); EXPECT_TRUE(warned(reader.getWarnings(),"dat.missing_analog"));
 }
 TEST(Extensions, LegacyMissingMarkersAreRevisionDependent) {
